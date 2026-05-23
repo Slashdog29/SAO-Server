@@ -1,570 +1,310 @@
-#!/usr/bin/env python3
-"""
-FORGE DIRECTORY / SERVERS — Panel de Control Estilo SAO
-Requisito: Python 3.10+ en Arch Linux o derivados.
-Ejecutar: python sao_panel.py
-"""
-
 import sys
 import subprocess
 import os
 import time
-import random
+from datetime import datetime
 
-# ----------------------------------------------------------------------
-# BLOQUE DEFENSIVO DE AUTO-INSTALACIÓN DE PyQt6 (Arch/CachyOS/Manjaro)
-# ----------------------------------------------------------------------
+# --- BLOQUE DE AUTO-INSTALACIÓN (PACMAN NATIVO PARA ARCH) ---
 def ensure_dependencies():
     try:
+        import psutil
         from PyQt6 import QtWidgets, QtCore, QtGui
     except ImportError:
-        print("\n" + "="*60)
-        print("[SYSTEM] SAO UI COMPONENTS NOT DETECTED.")
-        print("[SYSTEM] INITIATING FORGE SYNC WITH ARCH LINUX REPOSITORIES...")
-        print("="*60 + "\n")
+        print("\n[SYSTEM] INITIATING NEURAL LINK SYNC...")
         try:
-            subprocess.run(
-                ["sudo", "pacman", "-S", "--noconfirm", "python-pyqt6"],
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT
-            )
-            print("\n[SUCCESS] UI COMPONENT SYNC COMPLETE. INITIALIZING LINK START...\n")
-        except subprocess.CalledProcessError:
-            print("\n[ERROR] FAILED TO INSTALL DEPENDENCIES. PLEASE RUN: sudo pacman -S python-pyqt6")
-            sys.exit(1)
-        except FileNotFoundError:
-            print("\n[ERROR] 'sudo' o 'pacman' no encontrados. ¿Estás en Arch Linux?")
+            subprocess.run(["sudo", "pacman", "-S", "--noconfirm", "python-pyqt6", "python-psutil"], check=True)
+            print("[SUCCESS] Sync Complete. Restarting Script...\n")
+            os.execv(sys.executable, ['python'] + sys.argv)
+        except Exception as e:
+            print(f"[ERROR] Sync Failed: {e}")
             sys.exit(1)
 
 ensure_dependencies()
 
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QComboBox, QProgressBar, QTextEdit,
-    QFrame, QGridLayout, QScrollBar
-)
-from PyQt6.QtCore import Qt, QTimer, QSize
-from PyQt6.QtGui import QFont, QColor, QLinearGradient
+import psutil
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QHBoxLayout, QLabel, QPushButton, QComboBox, 
+                             QProgressBar, QTextEdit, QFrame, QGridLayout)
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QFont
 
-# ----------------------------------------------------------------------
-# HOJA DE ESTILOS SAO (QSS)
-# ----------------------------------------------------------------------
-SAO_QSS = """
-QMainWindow {
-    background-color: #1a1a24;
+# --- DISEÑO GLASS-SAO PREMIUM (QSS) ---
+SAO_GLASS_QSS = """
+QMainWindow { background-color: transparent; }
+
+QWidget#MainContainer {
+    background-color: rgba(15, 15, 22, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 20px;
 }
 
-QWidget {
-    color: #e0e0e0;
-    font-family: 'Inter', sans-serif;
+QFrame#GlassCard {
+    background-color: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
 }
 
-/* HP Bars */
+QLabel { color: #ffffff; font-family: 'Inter', sans-serif; }
+
 QProgressBar {
-    border: 1px solid #3d3d4d;
-    border-radius: 2px;
-    background-color: #0a0a0f;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background-color: rgba(0, 0, 0, 0.5);
+    height: 18px;
     text-align: center;
     color: white;
+    font-size: 10px;
     font-weight: bold;
-    height: 18px;
-}
-QProgressBar::chunk {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #00c896, stop:0.5 #ff7f00, stop:1 #ff3300);
-    border-radius: 3px;
-}
-
-/* Contenedores estilo SAO */
-QFrame#Card {
-    background-color: rgba(45, 45, 60, 0.5);
-    border: 1px solid #3d3d4d;
-    border-radius: 6px;
-    padding: 12px;
-}
-
-/* Selectores */
-QComboBox {
-    background-color: #252533;
-    border: 1px solid #ff7f00;
-    padding: 6px 12px;
     border-radius: 4px;
-    color: #ff7f00;
-    font-weight: bold;
-    font-size: 12px;
 }
-QComboBox:hover {
-    border-color: #00ff99;
-}
-QComboBox::drop-down {
-    border-left: 1px solid #3d3d4d;
-    width: 20px;
-}
-QComboBox QAbstractItemView {
-    background-color: #252533;
-    border: 1px solid #3d3d4d;
-    selection-background-color: #ff7f00;
-    color: #e0e0e0;
-}
+QProgressBar::chunk { width: 2px; }
 
-/* Botones generales */
 QPushButton {
-    background-color: #323242;
-    border: 1px solid #4d4d5d;
-    padding: 8px 16px;
+    background-color: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 10px;
+    color: white;
     font-weight: bold;
     text-transform: uppercase;
-    font-size: 11px;
-    border-radius: 4px;
+    font-size: 10px;
+    border-radius: 5px;
 }
-QPushButton:hover {
-    background-color: #44445a;
-    border-color: #00ff99;
-}
+QPushButton:hover { background-color: rgba(255, 255, 255, 0.15); }
 
-/* Botón verde (Link Start) */
 QPushButton#LinkStart {
-    background-color: rgba(0, 200, 150, 0.15);
-    border: 2px solid #00c896;
-    color: #00c896;
-    font-size: 14px;
+    border: 2px solid #00ffcc;
+    color: #00ffcc;
+    background-color: rgba(0, 255, 204, 0.05);
 }
-QPushButton#LinkStart:hover {
-    background-color: rgba(0, 200, 150, 0.25);
-}
+QPushButton#LinkStart:hover { background-color: #00ffcc; color: #000; }
 
-/* Botón naranja/rojo (Log Out) */
 QPushButton#LogOut {
-    background-color: rgba(255, 68, 68, 0.15);
-    border: 2px solid #ff4444;
-    color: #ff4444;
-    font-size: 14px;
+    border: 2px solid #ff7f00;
+    color: #ff7f00;
+    background-color: rgba(255, 127, 0, 0.05);
 }
-QPushButton#LogOut:hover {
-    background-color: rgba(255, 68, 68, 0.25);
+QPushButton#LogOut:hover { background-color: #ff7f00; color: #000; }
+
+QPushButton#FolderBtn {
+    background-color: rgba(255, 255, 255, 0.1);
+    border: 1px dashed #ff7f00;
+    color: #ff7f00;
 }
 
-/* Consola de logs */
-QTextEdit {
-    background-color: #050508;
-    border: none;
-    border-top: 2px solid #3d3d4d;
+QComboBox {
+    background-color: rgba(0, 0, 0, 0.6);
+    border: 1px solid #00ffcc;
+    border-radius: 4px;
+    padding: 5px;
+    color: #00ffcc;
+    font-weight: bold;
+}
+
+QTextEdit#YuiTerminal {
+    background-color: rgba(0, 0, 0, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    color: #00ffcc;
     font-family: 'Fira Code', monospace;
-    font-size: 12px;
-    color: #00e6cc;
+    font-size: 11px;
+    border-radius: 8px;
 }
 """
 
-# ----------------------------------------------------------------------
-# FILA DE SERVICIO (Apache / Base de Datos)
-# ----------------------------------------------------------------------
-class ServiceRow(QFrame):
-    def __init__(self, name, parent=None):
+class YuiMonitor(QWidget):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName("Card")
-        self.service_name = name
-        self._active = False
+        layout = QVBoxLayout(self)
+        self.terminal = QTextEdit()
+        self.terminal.setObjectName("YuiTerminal")
+        self.terminal.setReadOnly(True)
+        layout.addWidget(self.terminal)
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 6, 10, 6)
+    def log(self, text, color="#00ffcc"):
+        now = datetime.now().strftime("%H:%M:%S")
+        self.terminal.append(f"<span style='color: #555;'>[{now}]</span> <span style='color: {color};'>&gt; {text}</span>")
+        self.terminal.verticalScrollBar().setValue(self.terminal.verticalScrollBar().maximum())
 
-        # Círculo indicador de estado
-        self.status_dot = QLabel()
-        self.status_dot.setFixedSize(14, 14)
-        self.set_inactive()
-
-        # Nombre del servicio
-        self.label = QLabel(name.upper())
-        self.label.setStyleSheet("font-weight: 800; letter-spacing: 1px;")
-
-        # Botones individuales
-        self.btn_start = QPushButton("Iniciar")
-        self.btn_stop = QPushButton("Detener")
-        self.btn_stop.setStyleSheet("color: #ff4444;")
-
-        layout.addWidget(self.status_dot)
-        layout.addWidget(self.label)
-        layout.addStretch()
-        layout.addWidget(self.btn_start)
-        layout.addWidget(self.btn_stop)
-
-    def set_active(self, state: bool):
-        self._active = state
-        if state:
-            self.status_dot.setStyleSheet(
-                "background-color: #00e6a8; border-radius: 7px;"
-            )
-        else:
-            self.set_inactive()
-
-    def set_inactive(self):
-        self.status_dot.setStyleSheet(
-            "background-color: #ff3b3b; border-radius: 7px;"
-        )
-        self._active = False
-
-    def is_active(self):
-        return self._active
-
-# ----------------------------------------------------------------------
-# VENTANA PRINCIPAL DEL PANEL SAO
-# ----------------------------------------------------------------------
-class SAOPanel(QMainWindow):
+class Kirito(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("FORGE SYSTEM | ARCH LINUX CONTROL")
-        self.resize(1000, 700)
-        self.setStyleSheet(SAO_QSS)
+        self.setWindowTitle("SAO FORGE DIRECTORY")
+        self.resize(1100, 800)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        
+        self.container = QWidget()
+        self.container.setObjectName("MainContainer")
+        self.setCentralWidget(self.container)
+        
+        self.yui = YuiMonitor()
+        self.init_ui()
+        
+        # Iniciar monitoreo de métricas reales
+        self.stats_timer = QTimer()
+        self.stats_timer.timeout.connect(self.refresh_real_stats)
+        self.stats_timer.start(1000)
+        
+        # Cargar versiones de PHP instaladas
+        self.detect_php_versions()
+        
+        self.setStyleSheet(SAO_GLASS_QSS)
+        self.yui.log("Neural Link Established. System Metrics: Online.")
 
-        # Estados de servicios
-        self.apache_active = False
-        self.db_active = False
-        self.current_db_name = "MariaDB"
-
-        # Widget central
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(25, 25, 25, 25)
+    def init_ui(self):
+        main_layout = QVBoxLayout(self.container)
+        main_layout.setContentsMargins(35, 35, 35, 35)
         main_layout.setSpacing(20)
 
-        # ------------------------------------------------------------------
-        # 1. ENCABEZADO (Título + HP Bars)
-        # ------------------------------------------------------------------
-        header_layout = QHBoxLayout()
+        # --- 1. ENCABEZADO (Métricas y Carpeta) ---
+        header = QHBoxLayout()
+        title_vbox = QVBoxLayout()
+        title = QLabel("SAO DIRECTORY v0.2/ SERVERS")
+        title.setStyleSheet("font-size: 24px; font-weight: 900; letter-spacing: 5px;")
 
-        title_box = QVBoxLayout()
-        self.main_title = QLabel("FORGE DIRECTORY / SERVERS")
-        self.main_title.setStyleSheet(
-            "font-size: 24px; font-weight: 900; color: #e0e0e0; letter-spacing: 3px;"
-        )
+        self.btn_php_folder = QPushButton("📂 Abrir PHP*")
+        self.btn_php_folder.setObjectName("FolderBtn")
+        self.btn_php_folder.clicked.connect(self.open_php_dir)
 
-        # Etiqueta de versión PHP (se actualiza con el selector)
-        self.php_ver_label = QLabel("SYSTEM ENGINE: PHP v8.3.x (Zend Runtime)")
-        self.php_ver_label.setStyleSheet(
-            "color: #ff7f00; font-size: 12px; font-weight: bold;"
-        )
-        title_box.addWidget(self.main_title)
-        title_box.addWidget(self.php_ver_label)
+        title_vbox.addWidget(title)
+        title_vbox.addWidget(self.btn_php_folder)
 
-        # Barras de salud (CPU / RAM)
-        stats_box = QGridLayout()
-        self.cpu_bar = QProgressBar()
-        self.ram_bar = QProgressBar()
-        # Etiquetas pequeñas
-        cpu_label = QLabel("CPU [CORE]")
-        cpu_label.setStyleSheet("font-size: 10px; color: #aaaaaa;")
-        ram_label = QLabel("RAM [DATA]")
-        ram_label.setStyleSheet("font-size: 10px; color: #aaaaaa;")
+        stats_grid = QGridLayout()
+        self.bar_cpu = QProgressBar()
+        self.bar_ram = QProgressBar()
 
-        stats_box.addWidget(cpu_label, 0, 0)
-        stats_box.addWidget(self.cpu_bar, 0, 1)
-        stats_box.addWidget(ram_label, 1, 0)
-        stats_box.addWidget(self.ram_bar, 1, 1)
+        stats_grid.addWidget(QLabel("CPU HEALTH:"), 0, 0)
+        stats_grid.addWidget(self.bar_cpu, 0, 1)
+        stats_grid.addWidget(QLabel("RAM ENERGY:"), 1, 0)
+        stats_grid.addWidget(self.bar_ram, 1, 1)
 
-        header_layout.addLayout(title_box, 60)
-        header_layout.addLayout(stats_box, 40)
-        main_layout.addLayout(header_layout)
+        header.addLayout(title_vbox, 55)
+        header.addLayout(stats_grid, 45)
+        main_layout.addLayout(header)
 
-        # ------------------------------------------------------------------
-        # 2. SELECTORES DE ENTORNO (Estilo inventario)
-        # ------------------------------------------------------------------
-        sel_container = QFrame()
-        sel_container.setObjectName("Card")
-        sel_layout = QHBoxLayout(sel_container)
-        sel_layout.setContentsMargins(12, 8, 12, 8)
+        # --- 2. SELECTORES DE INVENTARIO (PHP DINÁMICO) ---
+        inv_frame = QFrame()
+        inv_frame.setObjectName("GlassCard")
+        inv_layout = QHBoxLayout(inv_frame)
 
-        sel_layout.addWidget(QLabel("ENVIRONMENT SETUP:"))
-        self.php_select = QComboBox()
-        self.php_select.addItems(["PHP 8.3", "PHP 8.2", "PHP 8.1", "PHP 7.4"])
-        sel_layout.addWidget(self.php_select)
+        self.php_sel = QComboBox()
+        self.db_sel = QComboBox()
+        self.db_sel.addItems(["MySQL 8.0", "PostgreSQL", "MariaDB"])
+        
+        inv_layout.addWidget(QLabel("INSTALLED PHP:"))
+        inv_layout.addWidget(self.php_sel)
+        inv_layout.addSpacing(40)
+        inv_layout.addWidget(QLabel("DB ENGINE:"))
+        inv_layout.addWidget(self.db_sel)
+        inv_layout.addStretch()
+        main_layout.addWidget(inv_frame)
 
-        sel_layout.addSpacing(20)
-        sel_layout.addWidget(QLabel("DATABASE UNIT:"))
-        self.db_select = QComboBox()
-        self.db_select.addItems(["MariaDB", "MySQL 8.0", "PostgreSQL"])
-        sel_layout.addWidget(self.db_select)
-        sel_layout.addStretch()
-        main_layout.addWidget(sel_container)
-
-        # ------------------------------------------------------------------
-        # 3. CONTROL DE SERVICIOS
-        # ------------------------------------------------------------------
-        content_layout = QHBoxLayout()
-
-        services_vbox = QVBoxLayout()
-        services_vbox.setSpacing(10)
-
-        # Fila Apache
-        self.row_apache = ServiceRow("Apache Server (httpd)")
-        self.row_apache.btn_start.clicked.connect(self.start_apache)
-        self.row_apache.btn_stop.clicked.connect(self.stop_apache)
-
-        # Fila Base de Datos
-        self.row_db = ServiceRow(self.current_db_name)
-        self.row_db.btn_start.clicked.connect(self.start_db)
-        self.row_db.btn_stop.clicked.connect(self.stop_db)
-
-        services_vbox.addWidget(self.row_apache)
-        services_vbox.addWidget(self.row_db)
-
-        # 4. BOTONES DE ACCIÓN GLOBAL
+        # --- 3. SERVICIOS Y ACCIONES GLOBALES ---
+        mid_layout = QHBoxLayout()
+        serv_vbox = QVBoxLayout()
+        self.row_kirito = self.create_service_row("Kirito Unit (Apache/httpd)")
+        self.row_asuna = self.create_service_row("Asuna Unit (Database)")
+        
         global_btns = QHBoxLayout()
-        self.btn_link_start = QPushButton("⚡ Link Start (Iniciar Todo)")
+        self.btn_link_start = QPushButton("⚡ LINK START")
         self.btn_link_start.setObjectName("LinkStart")
-        self.btn_link_start.setFixedHeight(55)
-        self.btn_link_start.clicked.connect(self.start_all)
-
-        self.btn_logout = QPushButton("🛑 Log Out (Detener Todo)")
-        self.btn_logout.setObjectName("LogOut")
-        self.btn_logout.setFixedHeight(55)
-        self.btn_logout.clicked.connect(self.stop_all)
-
+        self.btn_link_start.setFixedHeight(50)
+        self.btn_link_start.clicked.connect(lambda: self.yui.log("LINK START: Global initialization active.", "#00ffcc"))
+        
+        self.btn_log_out = QPushButton("🛑 LOG OUT")
+        self.btn_log_out.setObjectName("LogOut")
+        self.btn_log_out.setFixedHeight(50)
+        self.btn_log_out.clicked.connect(lambda: self.yui.log("LOG OUT: Global termination active.", "#ff7f00"))
+        
         global_btns.addWidget(self.btn_link_start)
-        global_btns.addWidget(self.btn_logout)
-        services_vbox.addLayout(global_btns)
+        global_btns.addWidget(self.btn_log_out)
 
-        content_layout.addLayout(services_vbox, 65)
+        serv_vbox.addWidget(self.row_kirito)
+        serv_vbox.addWidget(self.row_asuna)
+        serv_vbox.addLayout(global_btns)
+        mid_layout.addLayout(serv_vbox, 65)
 
-        # ------------------------------------------------------------------
-        # 5. CAJA DE HERRAMIENTAS / ACCIONES DE REPARACIÓN
-        # ------------------------------------------------------------------
         tools_frame = QFrame()
-        tools_frame.setObjectName("Card")
-        tools_grid = QGridLayout(tools_frame)
-        tools_grid.setSpacing(8)
+        tools_frame.setObjectName("GlassCard")
+        t_grid = QGridLayout(tools_frame)
+        t_list = ["Fix Apache", "Verify DB", "Root Pass", "Repair Panel", "🔄 Sync"]
+        for i, name in enumerate(t_list):
+            btn = QPushButton(name)
+            t_grid.addWidget(btn, i // 2, i % 2)
 
-        tools_grid.addWidget(
-            QLabel("MAINTENANCE PROTOCOLS"),
-            0, 0, 1, 2,
-            Qt.AlignmentFlag.AlignCenter
-        )
+        mid_layout.addWidget(tools_frame, 35)
+        main_layout.addLayout(mid_layout)
 
-        self.tool_apache = QPushButton("Acomodar / Arreglar Apache")
-        self.tool_db = QPushButton("Verificar BBDD")
-        self.tool_user = QPushButton("Cambiar Usuario/Clave")
-        self.tool_repair = QPushButton("Reparar Panel")
-        self.tool_sync = QPushButton("🔄 Sincronizar / Actualizar Panel")
-        self.tool_sync.setStyleSheet("color: #00ccff; border-color: #00ccff;")
+        # --- 4. TERMINAL YUI ---
+        main_layout.addWidget(self.yui)
 
-        # Conexiones de herramientas
-        self.tool_apache.clicked.connect(self.fix_apache)
-        self.tool_db.clicked.connect(self.check_db)
-        self.tool_user.clicked.connect(self.change_credentials)
-        self.tool_repair.clicked.connect(self.repair_panel)
-        self.tool_sync.clicked.connect(self.sync_panel)
+    def detect_php_versions(self):
+        """Escanea /etc/ en busca de directorios de PHP instalados (estándar en Arch)"""
+        self.php_sel.clear()
+        found_versions = []
+        
+        try:
+            # Lista directorios que empiezan por 'php' en /etc/
+            if os.path.exists("/etc/"):
+                items = os.listdir("/etc/")
+                # Filtrar directorios como 'php', 'php81', 'php74', etc.
+                php_dirs = [d for d in items if d.startswith("php") and os.path.isdir(os.path.join("/etc", d))]
+                
+                for d in sorted(php_dirs, reverse=True):
+                    # Formatear el nombre para que se vea bien (ej: php82 -> PHP 8.2)
+                    version_label = d.replace("php", "").strip()
+                    if not version_label:
+                        found_versions.append("PHP (System Default)")
+                    else:
+                        # Si es formato '82', poner '.' en medio
+                        if len(version_label) == 2:
+                            version_label = f"{version_label[0]}.{version_label[1]}"
+                        found_versions.append(f"PHP {version_label}")
+        except Exception as e:
+            self.yui.log(f"Detection Error: {e}", "#ff4444")
 
-        tools_grid.addWidget(self.tool_apache, 1, 0)
-        tools_grid.addWidget(self.tool_db, 1, 1)
-        tools_grid.addWidget(self.tool_user, 2, 0)
-        tools_grid.addWidget(self.tool_repair, 2, 1)
-        tools_grid.addWidget(self.tool_sync, 3, 0, 1, 2)
-
-        content_layout.addWidget(tools_frame, 35)
-        main_layout.addLayout(content_layout)
-
-        # ------------------------------------------------------------------
-        # 6. CONSOLA DE LOGS INTEGRADA
-        # ------------------------------------------------------------------
-        self.console = QTextEdit()
-        self.console.setReadOnly(True)
-        self.console.setPlaceholderText(">> SYSTEM IDLE. WAITING FOR COMMAND...")
-        main_layout.addWidget(self.console)
-
-        # ------------------------------------------------------------------
-        # Conexiones adicionales (cambios en selectores)
-        # ------------------------------------------------------------------
-        self.php_select.currentTextChanged.connect(self.update_php_display)
-        self.db_select.currentTextChanged.connect(self.update_db_display)
-
-        # Timer para refrescar las barras de salud según servicios activos
-        self.health_timer = QTimer()
-        self.health_timer.timeout.connect(self.refresh_health)
-        self.health_timer.start(2000)
-
-        # Mensaje inicial
-        self.log("Sistema SAO iniciado. Esperando comandos...")
-
-    # ------------------------------------------------------------------
-    # MÉTODOS DE LOG Y ACTUALIZACIÓN VISUAL
-    # ------------------------------------------------------------------
-    def log(self, message: str):
-        """Añade línea de log con timestamp y color turquesa."""
-        timestamp = time.strftime("%H:%M:%S")
-        formatted = (
-            f'<span style="color:#4d4d5d;">[{timestamp}]</span> '
-            f'<span style="color:#00e6cc;">{message}</span>'
-        )
-        self.console.append(formatted)
-        # Auto-scroll al final
-        self.console.verticalScrollBar().setValue(
-            self.console.verticalScrollBar().maximum()
-        )
-
-    def update_php_display(self, text):
-        """Actualiza la etiqueta de versión PHP al cambiar el selector."""
-        version = text.replace("PHP ", "v")
-        self.php_ver_label.setText(f"SYSTEM ENGINE: PHP {version}.x (Zend Runtime)")
-        self.log(f"[CONFIG] Versión PHP cambiada a {text}")
-
-    def update_db_display(self, text):
-        """Cambia el nombre mostrado en la fila de base de datos."""
-        self.current_db_name = text
-        self.row_db.label.setText(text.upper())
-        self.log(f"[CONFIG] Motor de base de datos cambiado a {text}")
-
-    def refresh_health(self):
-        """
-        Simula el uso de CPU y RAM basado en los servicios activos.
-        En producción usaríamos psutil.
-        """
-        cpu_base = 12.0
-        ram_base = 18.0
-        cpu = cpu_base
-        ram = ram_base
-
-        if self.row_apache.is_active():
-            cpu += 15.0
-            ram += 20.0
-        if self.row_db.is_active():
-            cpu += 10.0
-            ram += 25.0
-
-        # Añadir fluctuación aleatoria
-        cpu += random.uniform(-3, 3)
-        ram += random.uniform(-3, 3)
-        cpu = max(0, min(100, cpu))
-        ram = max(0, min(100, ram))
-
-        self.cpu_bar.setValue(int(cpu))
-        self.ram_bar.setValue(int(ram))
-
-    # ------------------------------------------------------------------
-    # FUNCIONES DE CONTROL DE SERVICIOS (simuladas con subprocess)
-    # ------------------------------------------------------------------
-    def run_command(self, cmd_list, success_msg):
-        """
-        Ejecuta un comando real en el sistema (simulado por ahora).
-        En producción usaríamos subprocess.run() sin la simulación.
-        """
-        self.log(f"$ {' '.join(cmd_list)}")
-        # --- SIMULACIÓN ---
-        # En una implementación real:
-        # try:
-        #     result = subprocess.run(cmd_list, capture_output=True, text=True)
-        #     if result.returncode == 0:
-        #         self.log(success_msg)
-        #     else:
-        #         self.log(f"Error: {result.stderr.strip()}")
-        # except Exception as e:
-        #     self.log(f"Excepción: {e}")
-        # -----------------
-        # Simulación: asumimos éxito siempre
-        self.log(success_msg)
-
-    def start_apache(self):
-        if not self.row_apache.is_active():
-            self.run_command(
-                ["sudo", "systemctl", "start", "httpd"],
-                "Apache httpd iniciado correctamente (PID simulado 1234)."
-            )
-            self.row_apache.set_active(True)
-            self.apache_active = True
+        if found_versions:
+            self.php_sel.addItems(found_versions)
+            self.yui.log(f"Detected {len(found_versions)} PHP versions in /etc/.")
         else:
-            self.log("⚠️ Apache ya está en ejecución.")
+            self.yui.log("Warning: No PHP configurations detected in /etc/php*.", "#ff4444")
 
-    def stop_apache(self):
-        if self.row_apache.is_active():
-            self.run_command(
-                ["sudo", "systemctl", "stop", "httpd"],
-                "Apache httpd detenido correctamente."
-            )
-            self.row_apache.set_inactive()
-            self.apache_active = False
-        else:
-            self.log("⚠️ Apache no está activo.")
+    def create_service_row(self, name):
+        f = QFrame(); f.setObjectName("GlassCard")
+        l = QHBoxLayout(f)
+        dot = QLabel(); dot.setFixedSize(12, 12)
+        dot.setStyleSheet("background-color: #ff4444; border-radius: 6px;")
+        l.addWidget(dot)
+        l.addWidget(QLabel(name.upper()))
+        l.addStretch()
+        l.addWidget(QPushButton("START"))
+        l.addWidget(QPushButton("STOP"))
+        return f
 
-    def start_db(self):
-        if not self.row_db.is_active():
-            db_unit = self._get_db_service_name()
-            self.run_command(
-                ["sudo", "systemctl", "start", db_unit],
-                f"{self.current_db_name} iniciado correctamente (PID simulado 5678)."
-            )
-            self.row_db.set_active(True)
-            self.db_active = True
-        else:
-            self.log(f"⚠️ {self.current_db_name} ya está en ejecución.")
+    def open_php_dir(self):
+        # Abre el directorio de la versión seleccionada o /etc general
+        selected = self.php_sel.currentText().lower().replace(" ", "").replace(".", "").replace("(systemdefault)", "")
+        path = f"/etc/{selected}" if selected.startswith("php") else "/etc/php"
+        
+        if not os.path.exists(path): path = "/etc/" # Fallback
 
-    def stop_db(self):
-        if self.row_db.is_active():
-            db_unit = self._get_db_service_name()
-            self.run_command(
-                ["sudo", "systemctl", "stop", db_unit],
-                f"{self.current_db_name} detenido correctamente."
-            )
-            self.row_db.set_inactive()
-            self.db_active = False
-        else:
-            self.log(f"⚠️ {self.current_db_name} no está activo.")
+        self.yui.log(f"Accessing folder: {path}", "#ff7f00")
+        subprocess.run(["xdg-open", path])
 
-    def _get_db_service_name(self):
-        """Devuelve el nombre del servicio systemd según el motor seleccionado."""
-        if self.current_db_name == "PostgreSQL":
-            return "postgresql"
-        elif self.current_db_name == "MySQL 8.0":
-            return "mysqld"
-        else:  # MariaDB
-            return "mariadb"
+    def refresh_real_stats(self):
+        cpu = psutil.cpu_percent()
+        ram = psutil.virtual_memory().percent
+        self.bar_cpu.setValue(int(cpu))
+        self.bar_cpu.setFormat(f"CPU HEALTH: {cpu}%")
+        self.bar_ram.setValue(int(ram))
+        self.bar_ram.setFormat(f"RAM ENERGY: {ram}%")
+        
+        color_cpu = "#ff4444" if cpu > 80 else "#00ffcc"
+        color_ram = "#ff4444" if ram > 85 else "#00ccff"
+        self.bar_cpu.setStyleSheet(f"QProgressBar::chunk {{ background-color: {color_cpu}; }}")
+        self.bar_ram.setStyleSheet(f"QProgressBar::chunk {{ background-color: {color_ram}; }}")
 
-    def start_all(self):
-        self.log("⚡ Link Start: Iniciando todos los servicios...")
-        self.start_apache()
-        self.start_db()
-
-    def stop_all(self):
-        self.log("🛑 Log Out: Deteniendo todos los servicios...")
-        self.stop_apache()
-        self.stop_db()
-
-    # ------------------------------------------------------------------
-    # HERRAMIENTAS DE MANTENIMIENTO
-    # ------------------------------------------------------------------
-    def fix_apache(self):
-        self.log("🔧 Ejecutando 'apachectl configtest'... Syntax OK")
-        self.log("🧹 Limpiando archivos .pid huérfanos... Eliminado /run/httpd/httpd.pid")
-        self.log("Apache acomodado correctamente.")
-
-    def check_db(self):
-        self.log(f"🩺 Verificando integridad de tablas en {self.current_db_name}...")
-        self.log("Tablas 'users', 'config' -> OK (sin errores).")
-
-    def change_credentials(self):
-        self.log("🔐 Solicitando cambio de credenciales del root de la base de datos...")
-        self.log("Usuario root: contraseña actualizada correctamente.")
-
-    def repair_panel(self):
-        self.log("🛠️ Restableciendo permisos en /var/www/html... chmod 755 aplicado.")
-        self.log("🗑️ Limpiando caché de panel... /tmp/sao_cache limpiado.")
-
-    def sync_panel(self):
-        self.log("🔄 Sincronizando estado actual de servicios...")
-        self.log(f"Apache: {'Activo' if self.row_apache.is_active() else 'Inactivo'}")
-        self.log(f"{self.current_db_name}: {'Activo' if self.row_db.is_active() else 'Inactivo'}")
-        self.refresh_health()
-        self.log("✅ Sincronización completada.")
-
-# ----------------------------------------------------------------------
-# PUNTO DE ENTRADA
-# ----------------------------------------------------------------------
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-
-    # Fuente global (si Inter no está disponible, usa la de sistema)
-    font = QFont("Inter", 10)
-    app.setFont(font)
-
-    panel = SAOPanel()
-    panel.show()
+    app.setStyle("Fusion")
+    app.setFont(QFont("Inter", 10))
+    kirito_ui = Kirito()
+    kirito_ui.show()
     sys.exit(app.exec())
