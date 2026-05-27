@@ -239,6 +239,11 @@ class Kirito(QMainWindow):
         self.sudo_password = None
         self.service_status_dots = {}
         self.git_repo_url = "git@github.com:Slashdog29/SAO-Server.git"
+        
+        # Credenciales internas para pruebas de conexión
+        self.db_user = "root"
+        self.db_pass = ""
+
         self.critical_deps = ["php", "apache", "mariadb", "php-apache", "php-gd"]
         self.recommended_deps = ["vte3", "mailpit"]
 
@@ -324,11 +329,13 @@ class Kirito(QMainWindow):
             if diag.exec():
                 self.yui.log("Initiating Automated Deployment of dependencies...", "#00ccff")
                 all_missing = missing_crit + missing_recom
-                res = self.run_cmd(["pacman", "-S", "--noconfirm", "--needed"] + all_missing, True)
+                # Agregamos -Sy para asegurar que las bases de datos de paquetes estén frescas
+                res = self.run_cmd(["pacman", "-Sy", "--noconfirm", "--needed"] + all_missing, True)
                 if res and res.returncode == 0:
                     self.yui.log("Deployment Complete. All modules are online.", "#00ffcc")
                 else:
-                    self.yui.log("Deployment Failed. Check manual logs.", "#ff4444")
+                    error_msg = res.stderr if res else "Unknown Error (Check Sudo/Internet)"
+                    self.yui.log(f"Deployment Failed: {error_msg}", "#ff4444")
             else:
                 self.yui.log("Warning: User ignored missing dependencies. System may be unstable.", "#ff7f00")
         else:
@@ -345,7 +352,7 @@ class Kirito(QMainWindow):
         # --- 1. ENCABEZADO (Métricas y Carpeta) ---
         header = QHBoxLayout()
         title_vbox = QVBoxLayout()
-        title = QLabel("SAO DIRECTORY v0.1 Beta/ SERVERS")
+        title = QLabel("SAO DIRECTORY v0.2 Beta/ SERVERS")
         title.setStyleSheet("font-size: 24px; font-weight: 900; letter-spacing: 5px;")
 
         self.btn_php_folder = QPushButton("⚙️ Config PHP")
@@ -437,18 +444,30 @@ class Kirito(QMainWindow):
         btn_repair = QPushButton("Repair Panel")
         btn_sync = QPushButton("🔄 Sync")
         btn_perms = QPushButton("Fix Perms")
+        btn_db_test = QPushButton("Test DB Conn")
+        btn_db_user = QPushButton("DB User")
+        btn_db_pass = QPushButton("DB Password")
+        btn_php_ext = QPushButton("Fix PHP Exts")
         
         btn_sync.clicked.connect(self.sync_repository)
         btn_repair.clicked.connect(self.repair_panel)
         btn_fix.clicked.connect(lambda: self.run_cmd(["systemctl", "reset-failed", "httpd"], True))
         btn_verify.clicked.connect(lambda: self.run_cmd(["mariadb-check", "--all-databases"], True))
         btn_perms.clicked.connect(self.fix_http_permissions)
+        btn_db_test.clicked.connect(self.test_db_connection)
+        btn_db_user.clicked.connect(self.manage_db_user)
+        btn_db_pass.clicked.connect(self.change_db_password)
+        btn_php_ext.clicked.connect(self.fix_php_extensions)
 
         t_grid.addWidget(btn_fix, 0, 0)
         t_grid.addWidget(btn_verify, 0, 1)
         t_grid.addWidget(btn_repair, 1, 0)
         t_grid.addWidget(btn_sync, 1, 1)
         t_grid.addWidget(btn_perms, 2, 0, 1, 2)
+        t_grid.addWidget(btn_db_test, 3, 0)
+        t_grid.addWidget(btn_db_user, 3, 1)
+        t_grid.addWidget(btn_db_pass, 4, 0)
+        t_grid.addWidget(btn_php_ext, 4, 1)
 
         mid_layout.addWidget(tools_frame, 35)
         main_layout.addLayout(mid_layout)
@@ -466,6 +485,15 @@ class Kirito(QMainWindow):
         """Escanea /etc/ en busca de directorios de PHP instalados (estándar en Arch)"""
         self.php_sel.clear()
         found_versions = []
+
+        # 1. Detectar versión binaria activa (CLI)
+        try:
+            res = subprocess.run(["php", "-v"], capture_output=True, text=True)
+            if res.returncode == 0:
+                version_line = res.stdout.splitlines()[0]
+                self.yui.log(f"Active Binary detected: {version_line}", "#00ffcc")
+        except FileNotFoundError:
+            self.yui.log("System PHP binary NOT found in PATH.", "#ff4444")
         
         try:
             # Lista directorios que empiezan por 'php' en /etc/
@@ -674,6 +702,83 @@ class Kirito(QMainWindow):
             self.yui.log("PERMISSIONS FIXED: Folder is now writeable by you.", "#00ffcc")
         else:
             self.yui.log("Error granting permissions. Check Sudo.", "#ff4444")
+
+    def fix_php_extensions(self):
+        """Habilita automáticamente extensiones críticas en php.ini"""
+        self.yui.log("Fixing PHP Extensions: Enabling mysqli, pdo_mysql & mbstring...", "#ff7f00")
+        php_ini = "/etc/php/php.ini"
+        
+        if os.path.exists(php_ini):
+            # Descomenta las extensiones y asegura que el directorio de extensiones sea correcto
+            cmd = ["sed", "-i", "-E", "s/^\s*;\s*extension\s*=\s*(mysqli|pdo_mysql|mbstring)/extension=\\1/g", php_ini]
+            res = self.run_cmd(cmd, True)
+            
+            if res and res.returncode == 0:
+                self.yui.log("PHP configuration updated. Restarting all units...", "#00ffcc")
+                self.manage_service("httpd", "restart")
+                self.manage_service("php-fpm", "restart")
+                
+                # Verificación de carga en CLI
+                check = subprocess.run(["php", "-m"], capture_output=True, text=True)
+                if "mysqli" in check.stdout:
+                    self.yui.log("Verification: 'mysqli' module is now ACTIVE in CLI.", "#00ffcc")
+                else:
+                    self.yui.log("Critical: Extension enabled in .ini but not detected. Manual check required.", "#ff4444")
+            else:
+                error = res.stderr if res else "Sudo required"
+                self.yui.log(f"Failed to modify php.ini: {error}", "#ff4444")
+        else:
+            self.yui.log("Critical: /etc/php/php.ini not found.", "#ff4444")
+
+    def test_db_connection(self):
+        """Verifica si MariaDB acepta las credenciales actuales"""
+        self.yui.log(f"Testing connection for user: {self.db_user}...", "#ff7f00")
+        cmd = ["mysqladmin", "-u", self.db_user]
+        if self.db_pass:
+            cmd.append(f"-p{self.db_pass}")
+        cmd.append("ping")
+        
+        # No usamos run_cmd con sudo aquí porque queremos probar el acceso normal
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode == 0:
+            self.yui.log("DATABASE CONNECTION: SUCCESSFUL", "#00ffcc")
+        else:
+            self.yui.log(f"DATABASE CONNECTION: FAILED. {res.stderr.strip()}", "#ff4444")
+            self.yui.log("Tip: Check if the password matches or use 'DB Password' to reset it.", "#555")
+
+    def manage_db_user(self):
+        """Consulta y permite cambiar el nombre de usuario de la DB en el panel"""
+        new_user, ok = QInputDialog.getText(self, "DB USER MANAGEMENT", 
+                                          f"Current Managed User: {self.db_user}\nEnter new username:",
+                                          QLineEdit.EchoMode.Normal, self.db_user)
+        if ok and new_user:
+            self.db_user = new_user
+            self.yui.log(f"Panel will now use DB user: {self.db_user}", "#00ccff")
+
+    def change_db_password(self):
+        """Cambia la contraseña del usuario en MariaDB usando privilegios administrativos"""
+        new_pass, ok = QInputDialog.getText(self, "DB SECURITY", 
+                                          f"Set new password for {self.db_user}:",
+                                          QLineEdit.EchoMode.Password)
+        if ok:
+            self.yui.log(f"Deploying new credentials for {self.db_user}...", "#ff7f00")
+            
+            # Comando SQL para cambiar la clave. Usamos ALTER USER que es el estándar moderno.
+            sql = f"ALTER USER '{self.db_user}'@'localhost' IDENTIFIED BY '{new_pass}'; FLUSH PRIVILEGES;"
+            
+            # Ejecutamos vía sudo para saltarnos restricciones de permisos iniciales
+            res = self.run_cmd(["mariadb", "-e", sql], True)
+            
+            if res and res.returncode == 0:
+                self.db_pass = new_pass
+                self.yui.log(f"DB PASSWORD UPDATED SUCCESSFULLY for {self.db_user}.", "#00ffcc")
+                self.yui.log("Synchronizing panel credentials...", "#555")
+                
+                # Actualizar también los archivos PHP si es posible (Opcional, loggeamos el aviso)
+                self.yui.log("HINT: Remember to update 'conexion.php' with the new password.", "#ffcc00")
+            else:
+                error_msg = res.stderr if res else "Unknown Error"
+                self.yui.log(f"Failed to update DB password: {error_msg}", "#ff4444")
 
     def open_selected_project(self):
         """Abre la carpeta del proyecto seleccionado en el combo box"""
