@@ -3,6 +3,7 @@ import subprocess
 import os
 import time
 from datetime import datetime
+import getpass
 
 # --- BLOQUE DE AUTO-INSTALACIÓN (PACMAN NATIVO PARA ARCH) ---
 def ensure_dependencies():
@@ -42,11 +43,13 @@ def ensure_dependencies():
 ensure_dependencies()
 
 import psutil
+from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QPushButton, QComboBox, 
-                             QProgressBar, QTextEdit, QFrame, QGridLayout, QInputDialog, QLineEdit)
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont
+                             QProgressBar, QTextEdit, QFrame, QGridLayout, 
+                             QInputDialog, QLineEdit, QDialog)
+from PyQt6.QtCore import Qt, QTimer, QSize
+from PyQt6.QtGui import QFont, QColor
 
 # --- DISEÑO GLASS-SAO PREMIUM (QSS) ---
 SAO_GLASS_QSS = """
@@ -110,6 +113,23 @@ QPushButton#FolderBtn {
     color: #ff7f00;
 }
 
+QDialog#DependencyDialog {
+    background-color: rgba(10, 10, 15, 0.98);
+    border: 2px solid #00ffcc;
+    border-radius: 15px;
+}
+
+QLabel#CriticalLabel { color: #ff4444; font-weight: bold; font-size: 11px; }
+QLabel#RecommendedLabel { color: #00ccff; font-weight: bold; font-size: 11px; }
+
+QPushButton#ActionBtn {
+    min-width: 120px;
+    height: 30px;
+    border: 1px solid #00ffcc;
+    background: rgba(0, 255, 204, 0.1);
+    color: #00ffcc;
+}
+
 QPushButton#ProjectBtn {
     background-color: rgba(0, 255, 204, 0.1);
     border: 1px solid #00ffcc;
@@ -149,6 +169,54 @@ class YuiMonitor(QWidget):
         self.terminal.append(f"<span style='color: #555;'>[{now}]</span> <span style='color: {color};'>&gt; {text}</span>")
         self.terminal.verticalScrollBar().setValue(self.terminal.verticalScrollBar().maximum())
 
+class DependencyDialog(QDialog):
+    def __init__(self, missing_crit, missing_recom, parent=None):
+        super().__init__(parent)
+        self.setObjectName("DependencyDialog")
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedSize(450, 350)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(25, 25, 25, 25)
+        
+        title = QLabel("CORE DEPENDENCY SCAN")
+        title.setStyleSheet("font-size: 18px; color: #00ffcc; font-weight: bold; letter-spacing: 2px;")
+        layout.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
+        
+        if missing_crit:
+            layout.addWidget(QLabel("CRITICAL (Missing Installation):", objectName="CriticalLabel"))
+            for pkg in missing_crit:
+                layout.addWidget(QLabel(f" • {pkg}"))
+        
+        if missing_recom:
+            layout.addSpacing(10)
+            layout.addWidget(QLabel("RECOMMENDED:", objectName="RecommendedLabel"))
+            for pkg in missing_recom:
+                layout.addWidget(QLabel(f" • {pkg}"))
+        
+        layout.addStretch()
+        
+        btn_layout = QHBoxLayout()
+        self.btn_ignore = QPushButton("IGNORE")
+        self.btn_install = QPushButton("INSTALL AUTOMATICALLY")
+        self.btn_install.setObjectName("ActionBtn")
+        
+        self.btn_ignore.clicked.connect(self.reject)
+        self.btn_install.clicked.connect(self.accept)
+        
+        btn_layout.addWidget(self.btn_ignore)
+        btn_layout.addWidget(self.btn_install)
+        layout.addLayout(btn_layout)
+
+    def mousePressEvent(self, event):
+        self.oldPos = event.globalPosition().toPoint()
+
+    def mouseMoveEvent(self, event):
+        delta = QtCore.QPoint(event.globalPosition().toPoint() - self.oldPos)
+        self.move(self.x() + delta.x(), self.y() + delta.y())
+        self.oldPos = event.globalPosition().toPoint()
+
 class SudoDialog(QInputDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -171,6 +239,13 @@ class Kirito(QMainWindow):
         self.sudo_password = None
         self.service_status_dots = {}
         self.git_repo_url = "git@github.com:Slashdog29/SAO-Server.git"
+        
+        # Credenciales internas para pruebas de conexión
+        self.db_user = "root"
+        self.db_pass = ""
+
+        self.critical_deps = ["php", "apache", "mariadb", "php-apache", "php-gd"]
+        self.recommended_deps = ["vte3", "mailpit"]
 
         self.container = QWidget()
         self.container.setObjectName("MainContainer")
@@ -180,10 +255,10 @@ class Kirito(QMainWindow):
         self.init_ui()
         
         # Iniciar monitoreo de métricas reales
-        self.stats_timer = QTimer()
+        self.stats_timer = QTimer(self)
         self.stats_timer.timeout.connect(self.refresh_real_stats)
         self.stats_timer.timeout.connect(self.poll_services_status)
-        self.stats_timer.start(1000)
+        self.stats_timer.start(2000)
         
         # Cargar versiones de PHP instaladas
         self.detect_php_versions()
@@ -191,7 +266,9 @@ class Kirito(QMainWindow):
         
         self.setStyleSheet(SAO_GLASS_QSS)
         self.yui.log("Neural Link Established. System Metrics: Online.", "#00ffcc")
-        self.yui.log("Welcome, Slashdog29. Waiting for Link Start...", "#00ccff")
+        
+        # Ejecutar verificación de dependencias al inicio
+        QtCore.QTimer.singleShot(500, self.check_system_dependencies)
 
     def get_sudo_auth(self):
         if self.sudo_password:
@@ -201,13 +278,14 @@ class Kirito(QMainWindow):
         if dialog.exec():
             password = dialog.textValue()
             # Validar contraseña con un comando simple
-            check = subprocess.run(["sudo", "-S", "true"], input=f"{password}\n".encode(), capture_output=True)
+            check = subprocess.run(["sudo", "-S", "true"], input=f"{password}\n", text=True, capture_output=True, env=os.environ.copy())
             if check.returncode == 0:
                 self.sudo_password = password
                 self.yui.log("Sudo Authentication: SUCCESSFUL", "#00ffcc")
                 return True
             else:
-                self.yui.log("Sudo Authentication: FAILED. Access Denied.", "#ff4444")
+                self.yui.log("Sudo Authentication: FAILED. Invalid Password.", "#ff4444")
+                self.sudo_password = None
                 return False
         return False
 
@@ -237,6 +315,35 @@ class Kirito(QMainWindow):
             self.yui.log(f"Execution Error: {e}", "#ff4444")
             return None
 
+    def check_system_dependencies(self):
+        """Escanea pacman para verificar el entorno y despliega el diálogo si falta algo"""
+        # Pausamos el monitoreo para evitar conflictos de UI durante el check modal
+        self.stats_timer.stop()
+        
+        missing_crit = [p for p in self.critical_deps if subprocess.run(["pacman", "-Qi", p], capture_output=True).returncode != 0]
+        missing_recom = [p for p in self.recommended_deps if subprocess.run(["pacman", "-Qi", p], capture_output=True).returncode != 0]
+        
+        if missing_crit or missing_recom:
+            self.yui.log("Integrity Scan: Gaps detected in local environment.", "#ff7f00")
+            diag = DependencyDialog(missing_crit, missing_recom, self)
+            if diag.exec():
+                self.yui.log("Initiating Automated Deployment of dependencies...", "#00ccff")
+                all_missing = missing_crit + missing_recom
+                # Agregamos -Sy para asegurar que las bases de datos de paquetes estén frescas
+                res = self.run_cmd(["pacman", "-Sy", "--noconfirm", "--needed"] + all_missing, True)
+                if res and res.returncode == 0:
+                    self.yui.log("Deployment Complete. All modules are online.", "#00ffcc")
+                else:
+                    error_msg = res.stderr if res else "Unknown Error (Check Sudo/Internet)"
+                    self.yui.log(f"Deployment Failed: {error_msg}", "#ff4444")
+            else:
+                self.yui.log("Warning: User ignored missing dependencies. System may be unstable.", "#ff7f00")
+        else:
+            self.yui.log("Integrity Scan: System is 100% compliant.", "#00ffcc")
+            
+        # Reanudamos el monitoreo una vez cerrado el diálogo
+        self.stats_timer.start(2000)
+
     def init_ui(self):
         main_layout = QVBoxLayout(self.container)
         main_layout.setContentsMargins(35, 35, 35, 35)
@@ -245,7 +352,7 @@ class Kirito(QMainWindow):
         # --- 1. ENCABEZADO (Métricas y Carpeta) ---
         header = QHBoxLayout()
         title_vbox = QVBoxLayout()
-        title = QLabel("SAO DIRECTORY v0.1 Beta/ SERVERS")
+        title = QLabel("SAO DIRECTORY v0.2 Beta/ SERVERS")
         title.setStyleSheet("font-size: 24px; font-weight: 900; letter-spacing: 5px;")
 
         self.btn_php_folder = QPushButton("⚙️ Config PHP")
@@ -337,18 +444,30 @@ class Kirito(QMainWindow):
         btn_repair = QPushButton("Repair Panel")
         btn_sync = QPushButton("🔄 Sync")
         btn_perms = QPushButton("Fix Perms")
+        btn_db_test = QPushButton("Test DB Conn")
+        btn_db_user = QPushButton("DB User")
+        btn_db_pass = QPushButton("DB Password")
+        btn_php_ext = QPushButton("Fix PHP Exts")
         
         btn_sync.clicked.connect(self.sync_repository)
         btn_repair.clicked.connect(self.repair_panel)
         btn_fix.clicked.connect(lambda: self.run_cmd(["systemctl", "reset-failed", "httpd"], True))
         btn_verify.clicked.connect(lambda: self.run_cmd(["mariadb-check", "--all-databases"], True))
         btn_perms.clicked.connect(self.fix_http_permissions)
+        btn_db_test.clicked.connect(self.test_db_connection)
+        btn_db_user.clicked.connect(self.manage_db_user)
+        btn_db_pass.clicked.connect(self.change_db_password)
+        btn_php_ext.clicked.connect(self.fix_php_extensions)
 
         t_grid.addWidget(btn_fix, 0, 0)
         t_grid.addWidget(btn_verify, 0, 1)
         t_grid.addWidget(btn_repair, 1, 0)
         t_grid.addWidget(btn_sync, 1, 1)
         t_grid.addWidget(btn_perms, 2, 0, 1, 2)
+        t_grid.addWidget(btn_db_test, 3, 0)
+        t_grid.addWidget(btn_db_user, 3, 1)
+        t_grid.addWidget(btn_db_pass, 4, 0)
+        t_grid.addWidget(btn_php_ext, 4, 1)
 
         mid_layout.addWidget(tools_frame, 35)
         main_layout.addLayout(mid_layout)
@@ -366,6 +485,15 @@ class Kirito(QMainWindow):
         """Escanea /etc/ en busca de directorios de PHP instalados (estándar en Arch)"""
         self.php_sel.clear()
         found_versions = []
+
+        # 1. Detectar versión binaria activa (CLI)
+        try:
+            res = subprocess.run(["php", "-v"], capture_output=True, text=True)
+            if res.returncode == 0:
+                version_line = res.stdout.splitlines()[0]
+                self.yui.log(f"Active Binary detected: {version_line}", "#00ffcc")
+        except FileNotFoundError:
+            self.yui.log("System PHP binary NOT found in PATH.", "#ff4444")
         
         try:
             # Lista directorios que empiezan por 'php' en /etc/
@@ -440,29 +568,22 @@ class Kirito(QMainWindow):
             self.yui.log(f"Error managing {service}: {res.stderr if res else 'Unknown'}", "#ff4444")
 
     def poll_services_status(self):
-        for srv, dot in self.service_status_dots.items():
-            res = subprocess.run(["systemctl", "is-active", srv], capture_output=True, text=True)
-            color = "#00ffcc" if res.stdout.strip() == "active" else "#ff4444"
-            dot.setStyleSheet(f"background-color: {color}; border-radius: 6px; border: 1px solid white;")
+        try:
+            for srv, dot in self.service_status_dots.items():
+                res = subprocess.run(["systemctl", "is-active", srv], capture_output=True, text=True)
+                color = "#00ffcc" if res.stdout.strip() == "active" else "#ff4444"
+                dot.setStyleSheet(f"background-color: {color}; border-radius: 6px; border: 1px solid white;")
+        except Exception as e:
+            print(f"Service Polling Error: {e}")
 
     def link_start_init(self):
         self.yui.log("LINK START: Initiating System Validation...", "#00ffcc")
-        # 1. Check Dependencies
-        deps = ["apache", "mariadb", "php"]
-        missing = []
-        for d in deps:
-            if subprocess.run(["pacman", "-Qi", d], capture_output=True).returncode != 0:
-                missing.append(d)
-        
+
+        # 1. Verificar si falta algo antes de arrancar
+        missing = [p for p in self.critical_deps if subprocess.run(["pacman", "-Qi", p], capture_output=True).returncode != 0]
         if missing:
-            self.yui.log(f"Missing Components: {', '.join(missing)}. Installing...", "#ff7f00")
-            res = self.run_cmd(["pacman", "-S", "--noconfirm"] + missing, True)
-            if res and res.returncode == 0:
-                self.yui.log("Components installed successfully.", "#00ffcc")
-            else:
-                error_msg = res.stderr if res else "Unknown Connection Error"
-                self.yui.log(f"Failed to install components: {error_msg}", "#ff4444")
-                return
+            self.yui.log(f"Critical components missing ({', '.join(missing)}). Deploying now...", "#ff7f00")
+            self.run_cmd(["pacman", "-S", "--noconfirm", "--needed"] + missing, True)
 
         # 2. MariaDB Init
         if not os.path.exists("/var/lib/mysql/mysql"):
@@ -514,16 +635,23 @@ class Kirito(QMainWindow):
             self.yui.log("Sync failed. Check SSH keys and connection.", "#ff4444")
 
     def repair_panel(self):
-        self.yui.log("REPAIR: Initiating self-diagnostic...", "#ff7f00")
+        self.yui.log("REPAIR: Initiating integrity recovery...", "#ff7f00")
         
-        # Obtener versión actual o commit
-        version = self.run_cmd(["git", "rev-parse", "--short", "HEAD"]).stdout.strip()
-        self.yui.log(f"Current version: {version}. Hard resetting to clean state...", "#555")
+        if self.run_cmd(["git", "rev-parse", "--is-inside-work-tree"]).returncode != 0:
+            self.yui.log("Fatal: Not a git repository. Repair aborted.", "#ff4444")
+            return
+
+        # Identificar versión actual
+        version = self.run_cmd(["git", "describe", "--tags"]).stdout.strip()
+        if not version:
+            version = self.run_cmd(["git", "rev-parse", "HEAD"]).stdout.strip()
+
+        self.yui.log(f"Restoring to version: {version}...", "#555")
         
-        # Reset hard para eliminar corrupciones/conflictos
-        res = self.run_cmd(["git", "reset", "--hard", "HEAD"])
+        # Reset hard y clean
+        res = self.run_cmd(["git", "reset", "--hard", version])
         if res.returncode == 0:
-            self.run_cmd(["git", "clean", "-fd"]) # Borrar archivos no trackeados
+            self.run_cmd(["git", "clean", "-fd"])
             self.yui.log("REPAIR COMPLETE: Integrity restored.", "#00ffcc")
         else:
             self.yui.log("REPAIR FAILED: System manual intervention required.", "#ff4444")
@@ -563,7 +691,7 @@ class Kirito(QMainWindow):
         """Otorga permisos al usuario actual y al grupo 'http' sobre la carpeta del servidor"""
         self.yui.log("Granting permissions for /srv/http/...", "#ff7f00")
         path = "/srv/http/"
-        user = os.getlogin()
+        user = getpass.getuser()
         
         # chown -R user:http /srv/http
         res1 = self.run_cmd(["chown", "-R", f"{user}:http", path], True)
@@ -574,6 +702,83 @@ class Kirito(QMainWindow):
             self.yui.log("PERMISSIONS FIXED: Folder is now writeable by you.", "#00ffcc")
         else:
             self.yui.log("Error granting permissions. Check Sudo.", "#ff4444")
+
+    def fix_php_extensions(self):
+        """Habilita automáticamente extensiones críticas en php.ini"""
+        self.yui.log("Fixing PHP Extensions: Enabling mysqli, pdo_mysql & mbstring...", "#ff7f00")
+        php_ini = "/etc/php/php.ini"
+        
+        if os.path.exists(php_ini):
+            # Descomenta las extensiones y asegura que el directorio de extensiones sea correcto
+            cmd = ["sed", "-i", "-E", "s/^\s*;\s*extension\s*=\s*(mysqli|pdo_mysql|mbstring)/extension=\\1/g", php_ini]
+            res = self.run_cmd(cmd, True)
+            
+            if res and res.returncode == 0:
+                self.yui.log("PHP configuration updated. Restarting all units...", "#00ffcc")
+                self.manage_service("httpd", "restart")
+                self.manage_service("php-fpm", "restart")
+                
+                # Verificación de carga en CLI
+                check = subprocess.run(["php", "-m"], capture_output=True, text=True)
+                if "mysqli" in check.stdout:
+                    self.yui.log("Verification: 'mysqli' module is now ACTIVE in CLI.", "#00ffcc")
+                else:
+                    self.yui.log("Critical: Extension enabled in .ini but not detected. Manual check required.", "#ff4444")
+            else:
+                error = res.stderr if res else "Sudo required"
+                self.yui.log(f"Failed to modify php.ini: {error}", "#ff4444")
+        else:
+            self.yui.log("Critical: /etc/php/php.ini not found.", "#ff4444")
+
+    def test_db_connection(self):
+        """Verifica si MariaDB acepta las credenciales actuales"""
+        self.yui.log(f"Testing connection for user: {self.db_user}...", "#ff7f00")
+        cmd = ["mysqladmin", "-u", self.db_user]
+        if self.db_pass:
+            cmd.append(f"-p{self.db_pass}")
+        cmd.append("ping")
+        
+        # No usamos run_cmd con sudo aquí porque queremos probar el acceso normal
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode == 0:
+            self.yui.log("DATABASE CONNECTION: SUCCESSFUL", "#00ffcc")
+        else:
+            self.yui.log(f"DATABASE CONNECTION: FAILED. {res.stderr.strip()}", "#ff4444")
+            self.yui.log("Tip: Check if the password matches or use 'DB Password' to reset it.", "#555")
+
+    def manage_db_user(self):
+        """Consulta y permite cambiar el nombre de usuario de la DB en el panel"""
+        new_user, ok = QInputDialog.getText(self, "DB USER MANAGEMENT", 
+                                          f"Current Managed User: {self.db_user}\nEnter new username:",
+                                          QLineEdit.EchoMode.Normal, self.db_user)
+        if ok and new_user:
+            self.db_user = new_user
+            self.yui.log(f"Panel will now use DB user: {self.db_user}", "#00ccff")
+
+    def change_db_password(self):
+        """Cambia la contraseña del usuario en MariaDB usando privilegios administrativos"""
+        new_pass, ok = QInputDialog.getText(self, "DB SECURITY", 
+                                          f"Set new password for {self.db_user}:",
+                                          QLineEdit.EchoMode.Password)
+        if ok:
+            self.yui.log(f"Deploying new credentials for {self.db_user}...", "#ff7f00")
+            
+            # Comando SQL para cambiar la clave. Usamos ALTER USER que es el estándar moderno.
+            sql = f"ALTER USER '{self.db_user}'@'localhost' IDENTIFIED BY '{new_pass}'; FLUSH PRIVILEGES;"
+            
+            # Ejecutamos vía sudo para saltarnos restricciones de permisos iniciales
+            res = self.run_cmd(["mariadb", "-e", sql], True)
+            
+            if res and res.returncode == 0:
+                self.db_pass = new_pass
+                self.yui.log(f"DB PASSWORD UPDATED SUCCESSFULLY for {self.db_user}.", "#00ffcc")
+                self.yui.log("Synchronizing panel credentials...", "#555")
+                
+                # Actualizar también los archivos PHP si es posible (Opcional, loggeamos el aviso)
+                self.yui.log("HINT: Remember to update 'conexion.php' with the new password.", "#ffcc00")
+            else:
+                error_msg = res.stderr if res else "Unknown Error"
+                self.yui.log(f"Failed to update DB password: {error_msg}", "#ff4444")
 
     def open_selected_project(self):
         """Abre la carpeta del proyecto seleccionado en el combo box"""
@@ -589,17 +794,20 @@ class Kirito(QMainWindow):
             self.yui.log("Please select a valid project from the index.", "#ff7f00")
 
     def refresh_real_stats(self):
-        cpu = psutil.cpu_percent()
-        ram = psutil.virtual_memory().percent
-        self.bar_cpu.setValue(int(cpu))
-        self.bar_cpu.setFormat(f"CPU HEALTH: {cpu}%")
-        self.bar_ram.setValue(int(ram))
-        self.bar_ram.setFormat(f"RAM ENERGY: {ram}%")
-        
-        color_cpu = "#ff4444" if cpu > 80 else "#00ffcc"
-        color_ram = "#ff4444" if ram > 85 else "#00ccff"
-        self.bar_cpu.setStyleSheet(f"QProgressBar::chunk {{ background-color: {color_cpu}; }}")
-        self.bar_ram.setStyleSheet(f"QProgressBar::chunk {{ background-color: {color_ram}; }}")
+        try:
+            cpu = psutil.cpu_percent()
+            ram = psutil.virtual_memory().percent
+            self.bar_cpu.setValue(int(cpu))
+            self.bar_cpu.setFormat(f"CPU HEALTH: {cpu}%")
+            self.bar_ram.setValue(int(ram))
+            self.bar_ram.setFormat(f"RAM ENERGY: {ram}%")
+            
+            color_cpu = "#ff4444" if cpu > 80 else "#00ffcc"
+            color_ram = "#ff4444" if ram > 85 else "#00ccff"
+            self.bar_cpu.setStyleSheet(f"QProgressBar::chunk {{ background-color: {color_cpu}; }}")
+            self.bar_ram.setStyleSheet(f"QProgressBar::chunk {{ background-color: {color_ram}; }}")
+        except Exception as e:
+            print(f"Stats Refresh Error: {e}")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
