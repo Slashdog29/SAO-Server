@@ -3,6 +3,12 @@ import sys
 import subprocess
 import os
 import time
+import threading
+import gc
+import glob
+import re
+import json
+import base64
 from datetime import datetime
 import getpass
 
@@ -48,11 +54,13 @@ ensure_dependencies()
 
 import psutil
 from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
+from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QPushButton, QComboBox, QMenu,
                              QProgressBar, QTextEdit, QFrame, QGridLayout, 
                              QInputDialog, QLineEdit, QDialog)
-from PyQt6.QtCore import Qt, QTimer, QSize
+from PyQt6.QtCore import Qt, QTimer, QSize, QUrl
 from PyQt6.QtGui import QFont, QColor
 
 # --- DISEÑO GLASS-SAO PREMIUM (QSS) ---
@@ -95,26 +103,54 @@ QPushButton {
     font-size: 10px;
     border-radius: 5px;
 }
-QPushButton:hover { background-color: rgba(255, 255, 255, 0.15); }
+QPushButton:hover { 
+    background-color: rgba(255, 255, 255, 0.15); 
+    border: 1px solid rgba(0, 255, 204, 0.5);
+    color: #00ffcc;
+}
+QPushButton:pressed {
+    background-color: rgba(255, 255, 255, 0.05);
+    padding-top: 11px;
+    padding-bottom: 9px;
+}
 
 QPushButton#LinkStart {
     border: 2px solid #00ffcc;
     color: #00ffcc;
     background-color: rgba(0, 255, 204, 0.05);
 }
-QPushButton#LinkStart:hover { background-color: #00ffcc; color: #000; }
+QPushButton#LinkStart:hover { 
+    background-color: #00ffcc; 
+    color: #000;
+    border: 2px solid #ffffff;
+}
+QPushButton#LinkStart:pressed { background-color: #008877; padding-top: 13px; padding-bottom: 7px; }
 
 QPushButton#LogOut {
     border: 2px solid #ff7f00;
     color: #ff7f00;
     background-color: rgba(255, 127, 0, 0.05);
 }
-QPushButton#LogOut:hover { background-color: #ff7f00; color: #000; }
+QPushButton#LogOut:hover { 
+    background-color: #ff7f00; 
+    color: #000;
+    border: 2px solid #ffffff;
+}
+QPushButton#LogOut:pressed { background-color: #aa5500; padding-top: 13px; padding-bottom: 7px; }
 
 QPushButton#FolderBtn {
     background-color: rgba(255, 255, 255, 0.1);
     border: 1px dashed #ff7f00;
     color: #ff7f00;
+}
+QPushButton#FolderBtn:hover {
+    background-color: rgba(255, 127, 0, 0.2);
+    border: 1px solid #ff7f00;
+    color: #ffffff;
+}
+QPushButton#FolderBtn:pressed {
+    background-color: rgba(255, 127, 0, 0.1);
+    padding-top: 12px;
 }
 
 QDialog#DependencyDialog {
@@ -133,11 +169,25 @@ QPushButton#ActionBtn {
     background: rgba(0, 255, 204, 0.1);
     color: #00ffcc;
 }
+QPushButton#ActionBtn:hover {
+    background: rgba(0, 255, 204, 0.3);
+}
+QPushButton#ActionBtn:pressed {
+    padding-top: 5px;
+    background: rgba(0, 255, 204, 0.05);
+}
 
 QPushButton#ProjectBtn {
     background-color: rgba(0, 255, 204, 0.1);
     border: 1px solid #00ffcc;
     color: #00ffcc;
+}
+QPushButton#ProjectBtn:hover {
+    background-color: rgba(0, 255, 204, 0.2);
+    color: #ffffff;
+}
+QPushButton#ProjectBtn:pressed {
+    padding-top: 12px;
 }
 
 QComboBox {
@@ -169,6 +219,61 @@ QMenu::item:selected {
     color: #00ffcc;
 }
 """
+
+TRANSLATIONS = {
+    "EN": {
+        "title": "SAO FORGE DIRECTORY - ARCH ADMIN",
+        "header_title": "SAO DIRECTORY v0.6 / SERVERS",
+        "php_unit": "PHP UNIT:",
+        "project": "PROJECT:",
+        "maintenance": "SYSTEM MAINTENANCE",
+        "open_proj": "🚀 OPEN PROJECT",
+        "link_start": "⚡ LINK START",
+        "log_out": "🛑 LOG OUT",
+        "yui_btn": "📄 ACTIVAR MONITOR DE LOGS (YUI TERMINAL)",
+        "lang_menu": "🇺🇸 Change Language",
+        "opt_root": "📂 Root Folder",
+        "opt_add": "🖥️ Add to Menu",
+        "opt_rm": "❌ Remove from Menu",
+        "opt_php": "⚙️ PHP Config",
+        "opt_clear": "🧹 Clear Logs",
+        "opt_about": "ℹ️ About",
+        "opt_hide": "👻 Hide Panel",
+        "opt_sync": "🔄 Sync Web Folder",
+        "tools": ["Repair Apache", "Optimize RAM", "🐘 Change PHP", "📧 Mailpit", "🧹 Clear Logs", "⚙️ Config Root", "Hide Yui"],
+        "tray_toggle": "Show/Hide Panel",
+        "tray_start": "🚀 Link Start (Services)",
+        "tray_stop": "💤 Log Out (Stop All)",
+        "tray_open": "📂 Open Projects Root",
+        "tray_exit": "❌ Exit SAO Server",
+    },
+    "ES": {
+        "title": "DIRECTORIO SAO FORGE - ADMIN ARCH",
+        "header_title": "DIRECTORIO SAO v0.3 / SERVIDORES",
+        "php_unit": "UNIDAD PHP:",
+        "project": "PROYECTO:",
+        "maintenance": "MANTENIMIENTO DEL SISTEMA",
+        "open_proj": "🚀 ABRIR PROYECTO",
+        "link_start": "⚡ LINK START",
+        "log_out": "🛑 LOG OUT",
+        "yui_btn": "📄 ACTIVAR MONITOR DE LOGS (TERMINAL YUI)",
+        "lang_menu": "🇪🇸 Cambiar Idioma",
+        "opt_root": "📂 Carpeta Raíz",
+        "opt_add": "🖥️ Añadir al Menú",
+        "opt_rm": "❌ Quitar del Menú",
+        "opt_php": "⚙️ Configuración PHP",
+        "opt_clear": "🧹 Limpiar Logs",
+        "opt_about": "ℹ️ Acerca de",
+        "opt_hide": "👻 Ocultar Panel",
+        "opt_sync": "🔄 Sincronizar Carpeta Web",
+        "tools": ["Reparar Apache", "Optimizar RAM", "🐘 Cambiar PHP", "📧 Mailpit", "🧹 Vaciar Logs", "⚙️ Config Raíz", "Hide Yui"],
+        "tray_toggle": "Mostrar/Ocultar Panel",
+        "tray_start": "🚀 Link Start (Servicios)",
+        "tray_stop": "💤 Log Out (Detener Todo)",
+        "tray_open": "📂 Abrir Raíz Proyectos",
+        "tray_exit": "❌ Salir de SAO Server",
+    }
+}
 
 class YuiMonitor(QWidget):
     def __init__(self, parent=None):
@@ -219,6 +324,8 @@ class DependencyDialog(QDialog):
         
         self.btn_ignore.clicked.connect(self.reject)
         self.btn_install.clicked.connect(self.accept)
+        self.btn_ignore.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_install.setCursor(Qt.CursorShape.PointingHandCursor)
         
         btn_layout.addWidget(self.btn_ignore)
         btn_layout.addWidget(self.btn_install)
@@ -268,10 +375,119 @@ class MissingDepsDialog(QDialog):
         
         self.btn_ignore.clicked.connect(self.reject)
         self.btn_install.clicked.connect(self.accept)
+        self.btn_ignore.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_install.setCursor(Qt.CursorShape.PointingHandCursor)
         
         btn_layout.addWidget(self.btn_ignore)
         btn_layout.addWidget(self.btn_install)
         layout.addLayout(btn_layout)
+
+    def mousePressEvent(self, event):
+        self.oldPos = event.globalPosition().toPoint()
+
+    def mouseMoveEvent(self, event):
+        delta = QtCore.QPoint(event.globalPosition().toPoint() - self.oldPos)
+        self.move(self.x() + delta.x(), self.y() + delta.y())
+        self.oldPos = event.globalPosition().toPoint()
+
+class SudoDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("DependencyDialog")
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedSize(500, 220)
+        self.parent_sao = parent
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(25, 25, 25, 25)
+        layout.setSpacing(20)
+
+        # Imagen lateral (sao.png)
+        self.img_label = QLabel()
+        path_img = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sao.png")
+        if os.path.exists(path_img):
+            pixmap = QtGui.QPixmap(path_img).scaled(140, 140, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.img_label.setPixmap(pixmap)
+        layout.addWidget(self.img_label)
+
+        # Contenedor derecho para el input y botones
+        right_layout = QVBoxLayout()
+        
+        title = QLabel("AUTHENTICATION REQUIRED")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #ff7f00; letter-spacing: 2px;")
+        right_layout.addWidget(title)
+        
+        label_text = QLabel("Enter Neural Link Admin Password (SUDO):")
+        label_text.setStyleSheet("font-size: 11px; color: #ffffff;")
+        right_layout.addWidget(label_text)
+
+        # Campo de contraseña con botón de visibilidad
+        pass_container = QHBoxLayout()
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setStyleSheet("background-color: #000; color: #ff7f00; border: 1px solid #ff7f00; padding: 8px; border-radius: 4px;")
+        self.password_input.setPlaceholderText("Password...")
+        
+        self.btn_toggle = QPushButton("👁")
+        self.btn_toggle.setFixedSize(35, 33)
+        self.btn_toggle.setCheckable(True)
+        self.btn_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_toggle.setStyleSheet("background: rgba(255,127,0,0.1); border: 1px solid #ff7f00; color: #ff7f00; font-size: 16px;")
+        self.btn_toggle.clicked.connect(self.toggle_password_visibility)
+        
+        pass_container.addWidget(self.password_input)
+        pass_container.addWidget(self.btn_toggle)
+        right_layout.addLayout(pass_container)
+
+        # Botones de acción (Cancel / Authorize)
+        btns = QHBoxLayout()
+        self.btn_cancel = QPushButton("CANCEL")
+        self.btn_ok = QPushButton("AUTHORIZE")
+        self.btn_ok.setObjectName("ActionBtn")
+        self.btn_ok.setStyleSheet("border: 1px solid #ff7f00; color: #ff7f00; background: rgba(255,127,0,0.05);")
+        
+        self.btn_cancel.clicked.connect(self.reject)
+        self.btn_ok.clicked.connect(self.accept)
+        self.btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_ok.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        # Agregar interactividad sonora
+        self.btn_ok.installEventFilter(self)
+        self.btn_cancel.installEventFilter(self)
+        self.btn_ok.clicked.connect(self._play_click)
+        self.btn_cancel.clicked.connect(self._play_click)
+        
+        self.password_input.returnPressed.connect(self.accept)
+
+        btns.addWidget(self.btn_cancel)
+        btns.addWidget(self.btn_ok)
+        right_layout.addLayout(btns)
+        
+        layout.addLayout(right_layout)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QtCore.QEvent.Type.Enter:
+            if self.parent_sao and hasattr(self.parent_sao, 'snd_hover') and self.parent_sao.snd_hover:
+                self.parent_sao.snd_hover.stop()
+                self.parent_sao.snd_hover.play()
+        return super().eventFilter(obj, event)
+
+    def _play_click(self):
+        if self.parent_sao and hasattr(self.parent_sao, 'snd_click') and self.parent_sao.snd_click:
+            self.parent_sao.snd_click.stop()
+            self.parent_sao.snd_click.play()
+
+    def toggle_password_visibility(self):
+        if self.btn_toggle.isChecked():
+            self.password_input.setEchoMode(QLineEdit.EchoMode.Normal)
+            self.btn_toggle.setText("🙈")
+        else:
+            self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+            self.btn_toggle.setText("👁")
+
+    def textValue(self):
+        return self.password_input.text()
 
     def mousePressEvent(self, event):
         self.oldPos = event.globalPosition().toPoint()
@@ -305,12 +521,15 @@ class CloseSelectionDialog(QDialog):
         
         self.btn_stop_exit = QPushButton("DETENER Y SALIR")
         self.btn_stop_exit.setObjectName("LogOut")
-        self.btn_exit = QPushButton("SOLO SALIR")
+        self.btn_exit = QPushButton("SALIR")
         self.btn_cancel = QPushButton("CANCELAR")
         
         self.btn_stop_exit.clicked.connect(lambda: self.done(1))
         self.btn_exit.clicked.connect(lambda: self.done(2))
         self.btn_cancel.clicked.connect(lambda: self.done(0))
+        self.btn_stop_exit.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_exit.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
         
         layout.addWidget(self.btn_stop_exit)
         layout.addWidget(self.btn_exit)
@@ -324,23 +543,178 @@ class CloseSelectionDialog(QDialog):
         self.move(self.x() + delta.x(), self.y() + delta.y())
         self.oldPos = event.globalPosition().toPoint()
 
-class SudoDialog(QInputDialog):
+class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("AUTHENTICATION REQUIRED")
-        self.setLabelText("Enter Neural Link Admin Password (SUDO):")
-        self.setTextEchoMode(QLineEdit.EchoMode.Password)
-        self.setStyleSheet(SAO_GLASS_QSS + """
-            QInputDialog { background-color: rgba(15, 15, 22, 0.98); border: 2px solid #ff7f00; }
-            QLineEdit { background-color: #000; color: #ff7f00; border: 1px solid #ff7f00; padding: 5px; }
-            QPushButton { min-width: 80px; }
-        """)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedSize(450, 300)
+        self.setObjectName("DependencyDialog") # Reutiliza el estilo Glass-SAO
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Cabecera con Botón Cerrar
+        header = QHBoxLayout()
+        title = QLabel("SAO-SERVER - SYSTEM INFO")
+        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #00ffcc; letter-spacing: 2px;")
+        
+        btn_close = QPushButton("✕")
+        btn_close.setFixedSize(25, 25)
+        btn_close.setStyleSheet("background: transparent; color: #ff4444; font-size: 16px; border: none;")
+        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_close.clicked.connect(self.close)
+        
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(btn_close)
+        layout.addLayout(header)
+
+        layout.addSpacing(20)
+
+        # Sección Creador (Avatar + Info)
+        creator_row = QHBoxLayout()
+        
+        self.avatar_label = QLabel()
+        self.avatar_label.setFixedSize(60, 60)
+        self.avatar_label.setStyleSheet("border: 2px solid #00ffcc; border-radius: 30px; background: rgba(0,0,0,0.3);")
+        self.avatar_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Cargar imagen de GitHub (Asíncrono)
+        self.manager = QNetworkAccessManager(self)
+        self.manager.finished.connect(self.on_avatar_loaded)
+        self.manager.get(QNetworkRequest(QtCore.QUrl("https://github.com/Slashdog29.png")))
+        
+        info_vbox = QVBoxLayout()
+        creator_label = QLabel("CREATOR: <span style='color: #00ffcc; font-weight: bold;'>Slashdog29</span>")
+        creator_label.setStyleSheet("font-size: 14px;")
+        link_label = QLabel("<a href='https://github.com/Slashdog29/SAO-Server' style='color: #00ffcc; text-decoration: none;'>github.com/Slashdog29/SAO-Server</a>")
+        link_label.setOpenExternalLinks(True)
+        link_label.setStyleSheet("font-size: 11px;")
+        
+        info_vbox.addWidget(creator_label)
+        info_vbox.addWidget(link_label)
+        
+        creator_row.addWidget(self.avatar_label)
+        creator_row.addLayout(info_vbox)
+        creator_row.addStretch()
+        layout.addLayout(creator_row)
+        
+        layout.addSpacing(30)
+
+        # Barra de Lenguajes
+        lang_label = QLabel("COMPOSITION ANALYSIS:")
+        lang_label.setStyleSheet("font-size: 9px; color: #555; font-weight: bold;")
+        layout.addWidget(lang_label)
+
+        lang_bar = QHBoxLayout()
+        lang_bar.setSpacing(2)
+        
+        # Análisis dinámico del repositorio
+        segments = self.calculate_repo_languages()
+
+        if not segments:
+            # Fallback en caso de error de escaneo
+            segments = [("#3776ab", 100, "Python")]
+
+        for color, weight, name in segments:
+            seg = QFrame()
+            seg.setFixedHeight(8)
+            seg.setStyleSheet(f"background-color: {color}; border-radius: 2px;")
+            lang_bar.addWidget(seg, int(weight))
+
+        layout.addLayout(lang_bar)
+
+        # Leyenda de lenguajes
+        legend_layout = QHBoxLayout()
+        for color, _, name in segments:
+            item = QLabel(f"<span style='color: {color};'>●</span> {name}")
+            item.setStyleSheet("font-size: 9px; color: #bbb;")
+            legend_layout.addWidget(item)
+        layout.addLayout(legend_layout)
+        layout.addStretch()
+
+    def calculate_repo_languages(self):
+        """Analiza los archivos del repositorio para calcular porcentajes de lenguaje reales"""
+        extensions_map = {
+            '.py': ('#3776ab', 'Python'),
+            '.qss': ('#007acc', 'CSS/QSS'),
+            '.css': ('#007acc', 'CSS/QSS'),
+            '.sh': ('#ffcc00', 'Shell'),
+            '.cpp': ('#41cd52', 'Qt/C++'),
+            '.h': ('#41cd52', 'Qt/C++'),
+            '.md': ('#555555', 'Markdown')
+        }
+        
+        stats = {} # { 'Nombre': [Color, TamañoTotal] }
+        total_project_size = 0
+        root_path = os.path.dirname(os.path.abspath(__file__))
+
+        for root, dirs, files in os.walk(root_path):
+            if '.git' in dirs: dirs.remove('.git') # Ignorar historial de git
+            for file in files:
+                ext = os.path.splitext(file)[1].lower()
+                if ext in extensions_map:
+                    color, name = extensions_map[ext]
+                    file_path = os.path.join(root, file)
+                    size = os.path.getsize(file_path)
+                    
+                    if name not in stats: stats[name] = [color, 0]
+                    stats[name][1] += size
+                    total_project_size += size
+
+        if total_project_size == 0: return []
+
+        # Convertir a formato (Color, Porcentaje, Nombre) y ordenar por tamaño
+        dynamic_segments = []
+        for name, (color, size) in stats.items():
+            percentage = (size / total_project_size) * 100
+            dynamic_segments.append((color, percentage, name))
+            
+        return sorted(dynamic_segments, key=lambda x: x[1], reverse=True)
+
+    def on_avatar_loaded(self, reply):
+        """Maneja la respuesta de la descarga del avatar y aplica máscara circular"""
+        if reply.error() == QNetworkReply.NetworkError.NoError:
+            data = reply.readAll()
+            pixmap = QtGui.QPixmap()
+            pixmap.loadFromData(data)
+            
+            if not pixmap.isNull():
+                # Crear máscara circular
+                size = 60
+                rounded_pixmap = QtGui.QPixmap(size, size)
+                rounded_pixmap.fill(Qt.GlobalColor.transparent)
+                
+                painter = QtGui.QPainter(rounded_pixmap)
+                painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+                path = QtGui.QPainterPath()
+                path.addEllipse(0, 0, size, size)
+                painter.setClipPath(path)
+                
+                # Dibujar pixmap escalado
+                painter.drawPixmap(0, 0, size, size, pixmap.scaled(size, size, 
+                                  Qt.AspectRatioMode.KeepAspectRatioByExpanding, 
+                                  Qt.TransformationMode.SmoothTransformation))
+                painter.end()
+                self.avatar_label.setPixmap(rounded_pixmap)
+        reply.deleteLater()
+
+    def mousePressEvent(self, event):
+        self.oldPos = event.globalPosition().toPoint()
+
+    def mouseMoveEvent(self, event):
+        delta = QtCore.QPoint(event.globalPosition().toPoint() - self.oldPos)
+        self.move(self.x() + delta.x(), self.y() + delta.y())
+        self.oldPos = event.globalPosition().toPoint()
 
 class Kirito(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("SAO FORGE DIRECTORY - ARCH ADMIN")
         self.setFixedSize(1100, 800)
+        self.favoritos = [] # Inicialización inmediata para evitar errores de atributo
+        self.idioma = "ES"
         
         # Centrar la ventana en la pantalla disponible
         qr = self.frameGeometry()
@@ -351,41 +725,172 @@ class Kirito(QMainWindow):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
         self.sudo_password = None
+        # En Arch Linux el default es /srv/http, en el resto /var/www/html.
+        self.dir_proyectos = "/srv/http" if os.path.exists("/etc/arch-release") else "/var/www/html"
+        self.version_php_actual = "..."
         self.service_status_dots = {}
         self.git_repo_url = "git@github.com:Slashdog29/SAO-Server.git"
+        self.ruta_config = os.path.expanduser("~/.sao-server-config.json")
         
         # Credenciales internas para pruebas de conexión
         self.db_user = "root"
         self.db_pass = ""
 
         self.critical_deps = ["php", "apache", "mariadb", "php-apache", "php-gd"]
-        self.recommended_deps = ["vte3", "mailpit"]
+        self.recommended_deps = ["vte3"]
 
         self.container = QWidget()
         self.container.setObjectName("MainContainer")
         self.setCentralWidget(self.container)
+        self.pixmap_cache = {}
         
         self.yui = YuiMonitor()
+        self.cargar_ajustes_sao()
         self.init_ui()
-        
-        # Iniciar monitoreo de métricas reales
-        self.stats_timer = QTimer(self)
-        self.stats_timer.timeout.connect(self.refresh_real_stats)
-        self.stats_timer.timeout.connect(self.poll_services_status)
-        self.stats_timer.start(2000)
-        
-        # Cargar versiones de PHP instaladas
-        self.detect_php_versions()
-        self.refresh_projects()
         
         self.setStyleSheet(SAO_GLASS_QSS)
         self.yui.log("Neural Link Established. System Metrics: Online.", "#00ffcc")
         
-        # Iniciar verificación de entorno tras carga
-        QTimer.singleShot(1000, self.check_environment_dependencies)
+        # Configuración de Audio y reproducción inicial
+        self.setup_audio()
+        if hasattr(self, 'snd_entrada') and self.snd_entrada:
+            self.snd_entrada.play()
+            
+        self.setup_tray_icon()
+        self.update_ui_texts()
+            
+        # Configurar Terminal Context Menu (Adaptación)
+        self.yui.terminal.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.yui.terminal.customContextMenuRequested.connect(self.show_yui_context_menu)
+        
+        # Iniciar lógica operativa del panel (Adaptado de GTK)
+        QtCore.QTimer.singleShot(100, self._iniciar_logica_panel)
+
+    def update_ui_texts(self):
+        """Actualiza todos los textos de la interfaz según el idioma seleccionado"""
+        t = TRANSLATIONS[self.idioma]
+        self.setWindowTitle(t["title"])
+        self.title_lbl.setText(t["header_title"])
+        self.lbl_php_unit.setText(t["php_unit"])
+        self.lbl_project.setText(t["project"])
+        self.btn_open_project.setText(t["open_proj"])
+        self.btn_link_start.setText(t["link_start"])
+        self.btn_log_out.setText(t["log_out"])
+        self.label_tools.setText(t["maintenance"])
+        self.btn_show_yui.setText(t["yui_btn"])
+        for btn, name in zip(self.tool_btns, t["tools"]):
+            btn.setText(name)
+
+        # Actualizar Menú de la Bandeja
+        if hasattr(self, 'tray_menu'):
+            self.tray_menu.clear()
+            
+            toggle_act = self.tray_menu.addAction(t["tray_toggle"])
+            toggle_act.triggered.connect(self.toggle_visibility)
+            
+            self.tray_menu.addSeparator()
+            
+            start_act = self.tray_menu.addAction(t["tray_start"])
+            start_act.triggered.connect(self.link_start_init)
+            
+            stop_act = self.tray_menu.addAction(t["tray_stop"])
+            stop_act.triggered.connect(self.log_out_stop)
+            
+            open_act = self.tray_menu.addAction(t["tray_open"])
+            open_act.triggered.connect(self.open_localhost)
+            
+            self.tray_menu.addSeparator()
+            
+            exit_act = self.tray_menu.addAction(t["tray_exit"])
+            exit_act.triggered.connect(self.close)
+
+    def toggle_language(self):
+        self.idioma = "EN" if self.idioma == "ES" else "ES"
+        self.update_ui_texts()
+        self.guardar_ajustes_sao()
+        self.yui.log(f"System: Language toggled to {self.idioma}", "#FFD700")
+
+    def setup_tray_icon(self):
+        """Configura el icono de la bandeja del sistema (Adaptación mejorada de GTK)."""
+        desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
+        session = os.environ.get("XDG_SESSION_TYPE", "").lower()
+
+        if not QtWidgets.QSystemTrayIcon.isSystemTrayAvailable():
+            self.yui.log("Tray Alert: Neural Link Tray is OFFLINE.", "#ff4444")
+            
+            if "gnome" in desktop:
+                self.yui.log("GNOME FIX: sudo pacman -S gnome-shell-extension-appindicator", "#00ccff")
+            elif "hyprland" in desktop or session == "wayland":
+                self.yui.log("Hyprland/Wayland DETECTED: Tray requires 'libdbusmenu-qt6'.", "#00ccff")
+                self.yui.log("Command: sudo pacman -S libdbusmenu-qt6 qt6-wayland", "#00ccff")
+                self.yui.log("Tip: Ensure 'tray' is active in Waybar and a SNI daemon is running.", "#555")
+            elif "kde" in desktop:
+                self.yui.log("KDE Plasma: Tray is native. Check 'Status Notifier' settings.", "#00ccff")
+
+            self.yui.log("System Tray Icon: Attempting forced Link Start...", "#00ffcc")
+            self.yui.log("Security Note: Running as 'sudo' blocks Tray detection.", "#ff7f00")
+            # En Wayland/Hyprland forzamos el intento de inicialización (Best Effort)
+            if session != "wayland": return
+
+        self.tray_icon = QtWidgets.QSystemTrayIcon(self)
+        
+        # Usar sao.png como icono de bandeja
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sao.png")
+        if os.path.exists(icon_path):
+            icon = QtGui.QIcon(icon_path)
+            self.tray_icon.setIcon(icon)
+        else:
+            icon = self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_ComputerIcon)
+            self.tray_icon.setIcon(icon)
+            
+        self.tray_menu = QMenu(self)
+        self.tray_menu.setObjectName("TrayMenu")
+        self.tray_menu.setStyleSheet(SAO_GLASS_QSS)
+        self.tray_icon.setContextMenu(self.tray_menu)
+        self.tray_icon.setToolTip("SAO Server Panel - Neural Link")
+        self.tray_icon.activated.connect(self.on_tray_icon_activated)
+        self.tray_icon.show()
+        self.yui.log("System Tray Icon: Active (Forced SNI).", "#00ffcc")
+
+    def on_tray_icon_activated(self, reason):
+        if reason == QtWidgets.QSystemTrayIcon.ActivationReason.Trigger:
+            self.toggle_visibility()
+
+    def toggle_visibility(self):
+        if self.isVisible():
+            self.hide()
+        else:
+            self.showNormal()
+            self.activateWindow()
+
+    def setup_audio(self):
+        """Inicializa los efectos de sonido del sistema SAO"""
+        def init_player(filename, loop=False, volume=0.5):
+            path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+            if not os.path.exists(path):
+                return None
+            
+            player = QMediaPlayer(self)
+            audio_output = QAudioOutput(self)
+            audio_output.setVolume(volume)
+            player.setAudioOutput(audio_output)
+            player.setSource(QUrl.fromLocalFile(path))
+            if loop:
+                player.setLoops(QMediaPlayer.Loops.Infinite.value)
+            return player
+
+        self.snd_entrada = init_player("entrada.mp3", loop=False)
+        self.snd_start = init_player("start.mp3")
+        self.snd_death = init_player("death.mp3")
+        self.snd_hover = init_player("hover.mp3", volume=0.2)
+        self.snd_click = init_player("click.mp3", volume=0.4)
 
     def request_sudo_password(self):
         """Muestra el diálogo SAO para obtener privilegios de administrador"""
+        # Prevenir SIGSEGV: No permitir la creación de diálogos fuera del hilo principal
+        if QtCore.QThread.currentThread() != QtWidgets.QApplication.instance().thread():
+            return False
+            
         dialog = SudoDialog(self)
         if dialog.exec():
             password = dialog.textValue()
@@ -469,6 +974,7 @@ class Kirito(QMainWindow):
         # Reanudamos el monitoreo una vez cerrado el diálogo
         self.stats_timer.start(2000)
 
+    @QtCore.pyqtSlot()
     def check_environment_dependencies(self):
         """Verifica dependencias del sistema y ofrece instalación automática"""
         self.yui.log("Escaneando integridad del entorno local...", "#555")
@@ -499,20 +1005,21 @@ class Kirito(QMainWindow):
         
         # Título y Botones de Sistema (⋮ y X)
         title_row = QHBoxLayout()
-        title = QLabel("SAO DIRECTORY v0.3 / SERVERS")
-        title.setStyleSheet("font-size: 22px; font-weight: 900; letter-spacing: 4px; color: #00ffcc;")
+        self.title_lbl = QLabel("SAO DIRECTORY v0.3 / SERVERS")
+        self.title_lbl.setStyleSheet("font-size: 22px; font-weight: 900; letter-spacing: 4px; color: #00ffcc;")
         
         self.btn_menu = QPushButton("⋮")
         self.btn_menu.setFixedSize(35, 35)
-        self.btn_menu.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.conectar_cursor_mano(self.btn_menu)
         self.btn_menu.clicked.connect(self.show_options_menu)
 
         self.btn_close = QPushButton("✕")
         self.btn_close.setFixedSize(35, 35)
         self.btn_close.setObjectName("LogOut")
         self.btn_close.clicked.connect(self.close)
+        self.conectar_cursor_mano(self.btn_close)
 
-        title_row.addWidget(title)
+        title_row.addWidget(self.title_lbl)
         title_row.addStretch()
         title_row.addWidget(self.btn_menu)
         title_row.addWidget(self.btn_close)
@@ -521,11 +1028,17 @@ class Kirito(QMainWindow):
         nav_row = QHBoxLayout()
         self.btn_php_folder = QPushButton("⚙️ CONFIG PHP"); self.btn_php_folder.setObjectName("FolderBtn")
         self.btn_localhost = QPushButton("🌐 LOCALHOST ROOT"); self.btn_localhost.setObjectName("FolderBtn")
+        self.btn_web_localhost = QPushButton("🌐 LOCALHOST WEB"); self.btn_web_localhost.setObjectName("ProjectBtn")
+        self.conectar_cursor_mano(self.btn_php_folder)
+        self.conectar_cursor_mano(self.btn_localhost)
+        self.conectar_cursor_mano(self.btn_web_localhost)
         self.btn_php_folder.clicked.connect(self.open_php_config)
         self.btn_localhost.clicked.connect(self.open_localhost)
+        self.btn_web_localhost.clicked.connect(self.open_web_localhost)
         
         nav_row.addWidget(self.btn_php_folder)
         nav_row.addWidget(self.btn_localhost)
+        nav_row.addWidget(self.btn_web_localhost)
         nav_row.addStretch()
 
         title_vbox.addLayout(title_row)
@@ -548,12 +1061,24 @@ class Kirito(QMainWindow):
         
         self.php_sel = QComboBox()
         self.project_sel = QComboBox()
+        self.project_sel.currentTextChanged.connect(self.actualizar_icono_favorito)
+
+        self.btn_fav = QPushButton("☆")
+        self.btn_fav.setFixedSize(40, 35)
+        self.btn_fav.setStyleSheet("font-size: 18px; color: #FFD700; background: rgba(255,215,0,0.05);")
+        self.btn_fav.clicked.connect(self.al_alternar_favorito)
+        self.conectar_cursor_mano(self.btn_fav)
+
         self.btn_open_project = QPushButton("🚀 OPEN PROJECT"); self.btn_open_project.setObjectName("ProjectBtn")
         self.btn_open_project.clicked.connect(self.open_selected_project)
+        self.conectar_cursor_mano(self.btn_open_project)
         
         sel_row = QHBoxLayout()
-        sel_row.addWidget(QLabel("PHP UNIT:")); sel_row.addWidget(self.php_sel, 1)
-        sel_row.addWidget(QLabel("PROJECT:")); sel_row.addWidget(self.project_sel, 2)
+        self.lbl_php_unit = QLabel("PHP UNIT:")
+        self.lbl_project = QLabel("PROJECT:")
+        sel_row.addWidget(self.lbl_php_unit); sel_row.addWidget(self.php_sel, 1)
+        sel_row.addWidget(self.lbl_project); sel_row.addWidget(self.project_sel, 2)
+        sel_row.addWidget(self.btn_fav)
         sel_row.addWidget(self.btn_open_project)
         inv_layout.addLayout(sel_row)
         main_layout.addWidget(inv_frame)
@@ -563,8 +1088,8 @@ class Kirito(QMainWindow):
         
         # Panel de Servicios
         serv_panel = QVBoxLayout()
-        serv_panel.addWidget(self.create_service_row("Apache Server", "httpd"))
-        serv_panel.addWidget(self.create_service_row("MariaDB Engine", "mysqld"))
+        serv_panel.addWidget(self.create_service_row("Kirito Engine (Apache)", "httpd"))
+        serv_panel.addWidget(self.create_service_row("Asuna Core (MariaDB)", "mariadb"))
         
         btn_row = QHBoxLayout()
         self.btn_link_start = QPushButton("⚡ LINK START"); self.btn_link_start.setObjectName("LinkStart")
@@ -572,6 +1097,8 @@ class Kirito(QMainWindow):
         self.btn_link_start.setFixedHeight(45); self.btn_log_out.setFixedHeight(45)
         self.btn_link_start.clicked.connect(self.link_start_init)
         self.btn_log_out.clicked.connect(self.log_out_stop)
+        self.conectar_cursor_mano(self.btn_link_start)
+        self.conectar_cursor_mano(self.btn_log_out)
         
         btn_row.addWidget(self.btn_link_start)
         btn_row.addWidget(self.btn_log_out)
@@ -584,30 +1111,95 @@ class Kirito(QMainWindow):
         t_grid = QGridLayout(tools_frame)
         t_grid.setSpacing(10)
         
-        label_tools = QLabel("SYSTEM MAINTENANCE"); label_tools.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label_tools.setStyleSheet("color: #555; font-size: 9px; font-weight: bold;")
-        t_grid.addWidget(label_tools, 0, 0, 1, 2)
+        self.label_tools = QLabel("SYSTEM MAINTENANCE"); self.label_tools.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label_tools.setStyleSheet("color: #555; font-size: 9px; font-weight: bold;")
+        t_grid.addWidget(self.label_tools, 0, 0, 1, 2)
 
         # Implementación de botones solicitados
         tools = [
-            ("Fix Apache", lambda: self.run_cmd(["systemctl", "reset-failed", "httpd"], True)),
-            ("Verify DB", lambda: self.run_cmd(["mariadb-check", "--all-databases"], True)),
-            ("Fix Perms", self.fix_http_permissions),
-            ("Sync", self.sync_repository),
-            ("Repair Panel", self.repair_panel)
+            (self.al_sanear_apache),
+            (self.al_optimizar_ram),
+            (self.al_cambiar_php),
+            (self.al_abrir_mailpit),
+            (self.al_vaciar_logs),
+            (self.al_abrir_ajustes),
+            (self.hide_yui_monitor)
         ]
 
-        for i, (name, func) in enumerate(tools):
-            btn = QPushButton(name)
+        self.tool_btns = []
+        for i, func in enumerate(tools):
+            btn = QPushButton()
             btn.setFixedSize(120, 35)
             btn.clicked.connect(func)
+            self.conectar_cursor_mano(btn)
             t_grid.addWidget(btn, (i // 2) + 1, i % 2)
+            self.tool_btns.append(btn)
 
         mid_layout.addWidget(tools_frame, 40)
         main_layout.addLayout(mid_layout)
 
+        # Botón para restaurar terminal cuando está oculta
+        self.btn_show_yui = QPushButton("📄 ACTIVAR MONITOR DE LOGS (YUI TERMINAL)")
+        self.btn_show_yui.setObjectName("ProjectBtn")
+        self.btn_show_yui.setFixedHeight(40)
+        self.conectar_cursor_mano(self.btn_show_yui)
+        self.btn_show_yui.clicked.connect(self.show_yui_monitor)
+        self.btn_show_yui.hide()
+        main_layout.addWidget(self.btn_show_yui)
+
         main_layout.addWidget(self.yui)
         
+    # --- LÓGICA DE FAVORITOS Y CONFIGURACIÓN ---
+    def cargar_ajustes_sao(self):
+        """Carga la configuración persistente (Favoritos y Carpeta)"""
+        if os.path.exists(self.ruta_config):
+            try:
+                with open(self.ruta_config, "r") as f:
+                    datos = json.load(f)
+                    self.dir_proyectos = datos.get("project_dir", self.dir_proyectos)
+                    self.favoritos = datos.get("favorites", [])
+                    self.idioma = datos.get("language", "ES")
+            except:
+                pass
+
+    def guardar_ajustes_sao(self):
+        """Guarda la configuración persistente"""
+        try:
+            datos = {
+                "project_dir": self.dir_proyectos,
+                "favorites": self.favoritos,
+                "language": self.idioma
+            }
+            with open(self.ruta_config, "w") as f:
+                json.dump(datos, f)
+        except:
+            pass
+
+    def al_alternar_favorito(self):
+        """Añade o quita el proyecto actual de la lista de favoritos"""
+        proyecto = self.project_sel.currentText()
+        if not proyecto or proyecto in ["No projects detected", "Localhost root missing"]: return
+        
+        if proyecto in self.favoritos:
+            self.favoritos.remove(proyecto)
+            self.yui.log(f"Project '{proyecto}' removed from favorites.", "#ff7f00")
+        else:
+            self.favoritos.append(proyecto)
+            self.yui.log(f"Project '{proyecto}' added to favorites! ★", "#FFD700")
+        
+        self.guardar_ajustes_sao()
+        self.actualizar_icono_favorito()
+        self.refresh_projects()
+        self.project_sel.setCurrentText(proyecto)
+
+    def actualizar_icono_favorito(self):
+        """Cambia el icono de la estrella según si el proyecto es favorito o no"""
+        proyecto = self.project_sel.currentText()
+        if proyecto in self.favoritos:
+            self.btn_fav.setText("★")
+        else:
+            self.btn_fav.setText("☆")
+
     def manage_service(self, service, action, ask_sudo=True):
         """Versión mejorada: Permite ejecución silenciosa en LOG OUT"""
         self.yui.log(f"Requesting {action.upper()} for {service}...", "#ff7f00")
@@ -637,11 +1229,11 @@ class Kirito(QMainWindow):
 
         # 1. Detectar versión binaria activa (CLI)
         try:
-            res = subprocess.run(["php", "-v"], capture_output=True, text=True)
-            if res.returncode == 0:
-                version_line = res.stdout.splitlines()[0]
-                self.yui.log(f"Active Binary detected: {version_line}", "#00ffcc")
-        except FileNotFoundError:
+            res = subprocess.run(["php", "-r", "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"], capture_output=True, text=True)
+            self.version_php_actual = res.stdout.strip()
+            self.yui.log(f"Active Binary detected: PHP {self.version_php_actual}", "#00ffcc")
+        except:
+            self.version_php_actual = "N/A"
             self.yui.log("System PHP binary NOT found in PATH.", "#ff4444")
         
         try:
@@ -671,18 +1263,24 @@ class Kirito(QMainWindow):
             self.yui.log("Warning: No PHP configurations detected in /etc/php*.", "#ff4444")
 
     def refresh_projects(self):
-        """Escanea /srv/http/ en busca de carpetas de proyectos"""
-        self.project_sel.clear()
-        path = "/srv/http/"
+        """Escanea el directorio raíz usando os.scandir para máxima velocidad"""
+        path = self.dir_proyectos
         if os.path.exists(path):
             try:
-                projects = [d for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))]
+                # os.scandir es mucho más rápido que os.listdir + os.path.isdir
+                with os.scandir(path) as it:
+                    projects = [entry.name for entry in it if entry.is_dir()]
+                
+                self.project_sel.clear()
                 if projects:
-                    self.project_sel.addItems(sorted(projects))
-                    self.yui.log(f"Project Index updated: {len(projects)} found.")
+                    projects.sort(key=lambda x: (0 if x in self.favoritos else 1, x.lower()))
+                    self.project_sel.addItems(projects)
+                    self.actualizar_icono_favorito()
+                    self.yui.log(f"Neural Index: {len(projects)} projects scanned.")
                 else:
                     self.project_sel.addItem("No projects detected")
             except Exception as e:
+                self.project_sel.clear()
                 self.yui.log(f"Scan Error: {e}", "#ff4444")
         else:
             self.project_sel.addItem("Localhost root missing")
@@ -703,18 +1301,333 @@ class Kirito(QMainWindow):
         
         btn_start.clicked.connect(lambda: self.manage_service(service_name, "start"))
         btn_stop.clicked.connect(lambda: self.manage_service(service_name, "stop"))
+        self.conectar_cursor_mano(btn_start)
+        self.conectar_cursor_mano(btn_stop)
         
         l.addWidget(btn_start)
         l.addWidget(btn_stop)
         return f
 
-    def manage_service(self, service, action):
-        self.yui.log(f"Requesting {action.upper()} for {service}...", "#ff7f00")
-        res = self.run_cmd(["systemctl", action, service], True)
-        if res and res.returncode == 0:
-            self.yui.log(f"Service {service} {action}ed successfully.", "#00ffcc")
-        else:
-            self.yui.log(f"Error managing {service}: {res.stderr if res else 'Unknown'}", "#ff4444")
+    def setup_localhost_index(self):
+        """Genera automáticamente el dashboard profesional de SAO (index, style, js)"""
+        path = self.dir_proyectos
+        if not os.path.exists(path):
+            # Intentar crear la carpeta raíz si no existe
+            res = self.run_cmd(["mkdir", "-p", path], True)
+            if not res or res.returncode != 0:
+                self.yui.log(f"Error: No se pudo crear la carpeta raíz {path}", "#ff4444")
+                return
+
+        if not self.sudo_password and not self.request_sudo_password():
+            return
+
+        index_php = r"""<?php
+/**
+ * SAO ForgeStack Explorer - Improved Edition
+ * Autonomous recursive navigation with project detection + launch capabilities
+ * Version: 2.0 (Neon Glassmorphism + Smart Routing)
+ */
+
+// 1. CONFIGURACIÓN Y SEGURIDAD
+$baseDir = realpath(__DIR__);
+$queryDir = isset($_GET['dir']) ? $_GET['dir'] : '';
+
+// Limpiar ruta: eliminar intentos de directory traversal
+$cleanPath = preg_replace('/\.\.|\\\\/', '', $queryDir);
+$currentFullPath = realpath($baseDir . DIRECTORY_SEPARATOR . $cleanPath);
+
+// Validar que no salimos del directorio raíz permitido
+if (!$currentFullPath || strpos($currentFullPath, $baseDir) !== 0) {
+    $currentFullPath = $baseDir;
+    $cleanPath = '';
+}
+
+// 2. OBTENER ELEMENTOS DEL DIRECTORIO ACTUAL
+$ignored = ['.', '..', '.git', 'node_modules', 'vendor', '.env', '.idea', '.DS_Store', 'thumbs.db'];
+$items = @scandir($currentFullPath);
+if ($items === false) { $items = []; }
+$items = array_diff($items, $ignored);
+
+// 3. CLASIFICAR CARPETAS (y contar elementos internos)
+$folders = [];
+foreach ($items as $item) {
+    $fullPath = $currentFullPath . DIRECTORY_SEPARATOR . $item;
+    if (is_dir($fullPath)) {
+        $isProject = false;
+        $identifiers = ['index.php', 'index.html', 'index.htm', 'composer.json', 'package.json'];
+        foreach ($identifiers as $id) {
+            if (file_exists($fullPath . DIRECTORY_SEPARATOR . $id)) {
+                $isProject = true;
+                break;
+            }
+        }
+        $subItems = @scandir($fullPath);
+        $subCount = $subItems ? count(array_diff($subItems, $ignored)) : 0;
+        $folders[] = [
+            'name'     => $item,
+            'relPath'  => trim($cleanPath . '/' . $item, '/'),
+            'type'     => $isProject ? 'project' : 'container',
+            'subCount' => $subCount
+        ];
+    }
+}
+usort($folders, function($a, $b) { return strcasecmp($a['name'], $b['name']); });
+
+// 4. BREADCRUMBS
+$breadcrumbs = array_filter(explode('/', $cleanPath));
+
+// 5. URL BASE PARA LANZAR PROYECTOS
+$scriptName = $_SERVER['SCRIPT_NAME'] ?? 'index.php';
+$baseWebPath = rtrim(dirname($scriptName), '/') . '/';
+if ($baseWebPath === '//') $baseWebPath = '/';
+?>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAO ForgeStack | <?php echo $cleanPath ? '/' . htmlspecialchars($cleanPath) : 'ROOT'; ?></title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="crt-overlay"></div>
+<div id="loading-screen">
+    <h1 class="loading-text">LINK START</h1>
+    <div class="progress-container"><div class="loading-bar" id="bar"></div></div>
+</div>
+<div class="main-interface">
+    <header class="status-bar">
+        <div class="breadcrumb">
+            <a href="index.php">◢ ROOT</a>
+            <?php 
+            $buildPath = '';
+            foreach($breadcrumbs as $crumb): 
+                $buildPath .= ($buildPath ? '/' : '') . $crumb;
+            ?>
+                <span>/</span><a href="index.php?dir=<?php echo urlencode($buildPath); ?>"><?php echo htmlspecialchars(strtoupper($crumb)); ?></a>
+            <?php endforeach; ?>
+        </div>
+        <div class="system-tag">
+            ⚡ FORGE // <span style="color:var(--neon-cyan)"><?php echo count($folders); ?> NODES</span>
+        </div>
+    </header>
+    <div class="search-bar">
+        <input type="text" id="filterInput" placeholder="[ FILTER NODES ]" autocomplete="off">
+    </div>
+    <main class="dashboard">
+        <div class="project-grid" id="projectGrid">
+            <?php if ($cleanPath !== ''): ?>
+                <a href="index.php?dir=<?php echo urlencode(dirname($cleanPath) == '.' ? '' : dirname($cleanPath)); ?>" class="project-card back-btn">
+                    <div class="project-name">⬆ RETURN TO UPPER LEVEL</div>
+                </a>
+            <?php endif; ?>
+            <?php foreach($folders as $folder): 
+                $isProject = ($folder['type'] === 'project');
+                $exploreUrl = 'index.php?dir=' . urlencode($folder['relPath']);
+                $launchUrl = $baseWebPath . $folder['relPath'] . '/';
+                $badgeText = $isProject ? '⚔️ DEPLOYABLE' : '📂 DIRECTORY';
+            ?>
+                <div class="project-card type-<?php echo $folder['type']; ?>" data-name="<?php echo htmlspecialchars(strtolower($folder['name'])); ?>">
+                    <div class="card-header">
+                        <div class="icon"><?php echo $isProject ? '⚡' : '🗀'; ?></div>
+                        <div class="project-info">
+                            <div class="project-name"><?php echo htmlspecialchars($folder['name']); ?></div>
+                            <span class="badge"><?php echo $badgeText; ?></span>
+                            <div class="subinfo">📦 <?php echo $folder['subCount']; ?> elementos</div>
+                        </div>
+                    </div>
+                    <div class="card-actions">
+                        <a href="<?php echo $exploreUrl; ?>" class="btn-explore">🔍 EXPLORE</a>
+                        <?php if ($isProject): ?>
+                            <a href="<?php echo $launchUrl; ?>" target="_blank" class="btn-launch">▶ LAUNCH</a>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    </main>
+    <footer>SAO ForgeStack Explorer v2 | <?php echo date('Y-m-d H:i:s'); ?></footer>
+</div>
+<script src="script.js"></script>
+</body>
+</html>"""
+
+        style_css = r""":root {
+  --neon-cyan: #00ffcc;
+  --neon-pink: #ff00aa;
+  --bg-color: #05070a;
+  --glass-bg: rgba(0, 255, 204, 0.05);
+  --card-border: rgba(0, 255, 204, 0.3);
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg-color);
+  color: #cfcfcf;
+  font-family: 'Courier New', monospace;
+  margin: 0;
+  overflow-x: hidden;
+}
+.crt-overlay {
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),
+              linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+  background-size: 100% 4px, 3px 100%;
+  pointer-events: none;
+  z-index: 9999;
+}
+.main-interface { padding: 30px 40px; opacity: 0; animation: fadeIn 0.6s forwards 0.4s; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+header.status-bar { border-bottom: 2px solid var(--neon-cyan); padding-bottom: 12px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: baseline; }
+.breadcrumb a { color: var(--neon-cyan); text-decoration: none; text-transform: uppercase; }
+.breadcrumb span { margin: 0 8px; color: #555; }
+.system-tag { font-size: 13px; background: rgba(0,255,204,0.1); padding: 6px 12px; border-radius: 20px; }
+.search-bar { margin-bottom: 25px; display: flex; justify-content: flex-end; }
+#filterInput { background: rgba(0,0,0,0.6); border: 1px solid var(--neon-cyan); padding: 10px 18px; color: var(--neon-cyan); font-family: monospace; outline: none; width: 280px; }
+.project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 22px; }
+.project-card {
+  position: relative;
+  border: 1px solid var(--card-border);
+  padding: 20px;
+  transition: 0.25s cubic-bezier(0.2, 0.9, 0.4, 1.1);
+  background: var(--glass-bg);
+  display: flex;
+  flex-direction: column;
+  text-decoration: none;
+  color: #fff;
+}
+.project-card:hover { transform: translateY(-4px); border-color: var(--neon-cyan); box-shadow: 0 8px 25px rgba(0, 255, 204, 0.15); }
+.project-card.type-project { border-left: 3px solid var(--neon-cyan); }
+.card-header { display: flex; align-items: center; gap: 15px; margin-bottom: 15px; }
+.icon { font-size: 38px; color: var(--neon-cyan); }
+.project-name { font-size: 1.1rem; font-weight: bold; margin-bottom: 6px; }
+.badge { font-size: 9px; padding: 2px 8px; border: 1px solid var(--neon-cyan); color: var(--neon-cyan); text-transform: uppercase; background: rgba(0,0,0,0.5); }
+.subinfo { font-size: 11px; color: #88aaff; }
+.card-actions { margin-top: 18px; display: flex; gap: 12px; border-top: 1px dashed rgba(0,255,204,0.2); padding-top: 14px; }
+.btn-explore, .btn-launch { font-size: 12px; text-decoration: none; padding: 5px 12px; transition: 0.2s; font-family: monospace; font-weight: bold; }
+.btn-explore { border: 1px solid var(--neon-cyan); color: var(--neon-cyan); }
+.btn-launch { background: rgba(0,255,204,0.15); border: 1px solid #00ccaa; color: #ccffff; }
+.btn-explore:hover, .btn-launch:hover { background: var(--neon-cyan); color: #000; }
+.back-btn { grid-column: 1 / -1; text-align: center; border-style: dashed; }
+footer { margin-top: 50px; text-align: center; font-size: 11px; color: #667788; }
+#loading-screen { position: fixed; inset: 0; background: var(--bg-color); z-index: 10000; display: flex; flex-direction: column; justify-content: center; align-items: center; transition: opacity 0.5s ease; }
+.loading-text { font-size: 42px; letter-spacing: 12px; color: var(--neon-cyan); text-shadow: 0 0 12px var(--neon-cyan); }
+.progress-container { width: 320px; height: 2px; background: rgba(255,255,255,0.2); margin-top: 20px; overflow: hidden; }
+.loading-bar { width: 0%; height: 100%; background: var(--neon-cyan); }"""
+
+        script_js = r"""window.addEventListener("load", () => {
+    const bar = document.getElementById('bar');
+    const loadingScreen = document.getElementById('loading-screen');
+    let width = 0;
+    const interval = setInterval(() => {
+        if (width >= 100) {
+            clearInterval(interval);
+            if (loadingScreen) {
+                loadingScreen.style.opacity = '0';
+                setTimeout(() => { if (loadingScreen.parentNode) loadingScreen.remove(); }, 500);
+            }
+            return;
+        }
+        width += Math.random() * 8 + 2;
+        if (width > 100) width = 100;
+        if (bar) bar.style.width = width + '%';
+    }, 35);
+
+    const filterInput = document.getElementById('filterInput');
+    const cards = document.querySelectorAll('.project-card');
+
+    function filterNodes() {
+        const term = filterInput.value.trim().toLowerCase();
+        cards.forEach(card => {
+            if (card.classList.contains('back-btn')) { card.style.display = ''; return; }
+            const nameAttr = card.getAttribute('data-name');
+            if (nameAttr && nameAttr.includes(term)) { card.style.display = ''; } 
+            else { card.style.display = 'none'; }
+        });
+    }
+    if (filterInput) filterInput.addEventListener('input', filterNodes);
+});"""
+
+        files = {
+            "index.php": index_php,
+            "style.css": style_css,
+            "script.js": script_js
+        }
+
+        for filename, content in files.items():
+            full_path = os.path.join(path, filename)
+            
+            # Codificar en base64 para evitar que el shell interprete los símbolos $ de PHP
+            content_b64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
+            cmd = f"echo '{content_b64}' | base64 -d | tee '{full_path}' > /dev/null"
+            
+            self.run_cmd(["sh", "-c", cmd], use_sudo=True)
+            # Asegurar que el archivo sea legible por el servidor inmediatamente
+            self.run_cmd(["chmod", "644", full_path], True)
+
+        self.yui.log(f"Neural Link: Dashboard files deployed to {path}", "#00ffcc")
+        self.fix_permissions(path)
+
+    def configure_apache_for_path(self, path):
+        """Genera dinámicamente la configuración de Apache para una ruta específica."""
+        if not os.path.exists(path):
+            self.yui.log(f"Error: Path {path} does not exist.", "#ff4444")
+            return False
+        
+        path = os.path.abspath(path).rstrip('/')
+        conf_file = "/etc/httpd/conf/extra/sao-server-projects.conf"
+        conf_content = f"""# Autogenerated by SAO-Server
+<Directory "{path}">
+    DirectoryIndex index.php index.html index.htm
+    Options +Indexes +FollowSymLinks +MultiViews
+    AllowOverride All
+    Require all granted
+    
+    AddType application/x-httpd-php .php
+    <FilesMatch \\.php$>
+        SetHandler application/x-httpd-php
+    </FilesMatch>
+</Directory>
+"""
+        temp_file = "/tmp/sao-projects.conf"
+        try:
+            with open(temp_file, "w") as f:
+                f.write(conf_content)
+            
+            # Mover a la configuración de Apache
+            self.run_cmd(["mv", temp_file, conf_file], use_sudo=True)
+            
+            # Asegurar que el archivo principal incluya esta configuración al principio de los extras
+            httpd_conf = "/etc/httpd/conf/httpd.conf"
+            include_line = f"Include {conf_file}"
+            # Usamos sed para insertar el Include antes de otros VirtualHosts si es posible
+            check_cmd = f"grep -q '{include_line}' {httpd_conf} || sed -i '1i {include_line}' {httpd_conf}"
+            self.run_cmd(["sh", "-c", check_cmd], use_sudo=True)
+            
+            self.yui.log(f"Apache config generated for {path}", "#00ffcc")
+            return True
+        except Exception as e:
+            self.yui.log(f"Config Generation Failed: {e}", "#ff4444")
+            return False
+
+    def fix_permissions(self, path):
+        """Repara el árbol de permisos desde ROOT hasta el destino para evitar Error 403."""
+        if not os.path.exists(path): return False
+        path = os.path.abspath(path)
+        
+        # 1. Traversal Path (Rápido): Asegurar acceso de búsqueda en padres
+        self.yui.log("Fixing Traversal Path (Aincrad Protocol)...", "#ff7f00")
+        cmd_traversal = f'p="{path}"; while [ "$p" != "/" ] && [ "$p" != "." ]; do chmod a+x "$p"; p=$(dirname "$p") 2>/dev/null || break; done'
+        self.run_cmd(["sh", "-c", cmd_traversal], use_sudo=True)
+        
+        # 2. Operaciones Recursivas (Pesadas): Optimizadas para una sola pasada lógica
+        user = getpass.getuser()
+        self.yui.log(f"Optimizing tree permissions for {user}:http...", "#00ccff")
+        self.run_cmd(["chown", "-R", f"{user}:http", path], use_sudo=True)
+        # u=rwX: Directorios (7) y Archivos (6). g/o=rX: Directorios (5) y Archivos (4).
+        self.run_cmd(["chmod", "-R", "u=rwX,g=rX,o=rX", path], use_sudo=True)
+        
+        return True
 
     def poll_services_status(self):
         try:
@@ -727,30 +1640,211 @@ class Kirito(QMainWindow):
 
     def link_start_init(self):
         self.yui.log("LINK START: Initiating System Validation...", "#00ffcc")
+        # Efectos de sonido de inicio
+        if hasattr(self, 'snd_start') and self.snd_start:
+            self.snd_start.play()
+        if hasattr(self, 'snd_entrada') and self.snd_entrada:
+            self.snd_entrada.stop()
 
-        # 1. Verificar si falta algo antes de arrancar
-        missing = [p for p in self.critical_deps if subprocess.run(["pacman", "-Qi", p], capture_output=True).returncode != 0]
-        if missing:
-            self.yui.log(f"Critical components missing ({', '.join(missing)}). Deploying now...", "#ff7f00")
-            self.run_cmd(["pacman", "-S", "--noconfirm", "--needed"] + missing, True)
+        # Lanzar la lógica pesada en un hilo separado para no congelar la UI
+        self._lanzar_hilo(self._tarea_iniciar_entorno_bg)
 
-        # 2. MariaDB Init
-        if not os.path.exists("/var/lib/mysql/mysql"):
+    def _tarea_iniciar_entorno_bg(self):
+        """Lógica operativa de inicio ejecutada en segundo plano."""
+        # 1. Configuración avanzada de Apache (MPM Prefork para PHP)
+        if os.path.exists("/etc/httpd/conf/httpd.conf"):
+            self.yui.log("Configuring Apache Modules (MPM Prefork)...", "#555")
+            enable_php = (
+                "sed -i 's/^LoadModule mpm_event_module/#LoadModule mpm_event_module/' /etc/httpd/conf/httpd.conf; "
+                "sed -i 's/^#LoadModule mpm_prefork_module/LoadModule mpm_prefork_module/' /etc/httpd/conf/httpd.conf; "
+                "sed -i 's/^#LoadModule speling_module/LoadModule speling_module/' /etc/httpd/conf/httpd.conf; "
+                r"grep -q 'DirectoryIndex index.php' /etc/httpd/conf/httpd.conf || sed -i '/<IfModule dir_module>/a \    DirectoryIndex index.php index.html' /etc/httpd/conf/httpd.conf; "
+                r"grep -q 'php_module' /etc/httpd/conf/httpd.conf || echo -e '\n# SAO PHP CONFIG\nLoadModule php_module modules/libphp.so\nInclude conf/extra/php_module.conf' >> /etc/httpd/conf/httpd.conf"
+            )
+            self.run_cmd(["sh", "-c", enable_php], use_sudo=True)
+
+        # 2. Inicialización de MariaDB (Si el directorio está vacío)
+        check_db = self.run_cmd(["test", "-d", "/var/lib/mysql/mysql"], use_sudo=True)
+        if check_db and check_db.returncode != 0:
             self.yui.log("Initializing MariaDB Data Directory...", "#ff7f00")
-            self.run_cmd(["mariadb-install-db", "--user=mysql", "--basedir=/usr", "--datadir=/var/lib/mysql"], True)
+            self.run_cmd(["mariadb-install-db", "--user=mysql", "--basedir=/usr", "--datadir=/var/lib/mysql"], use_sudo=True)
 
-        # 3. Start Services
-        self.manage_service("httpd", "start")
-        self.manage_service("mysqld", "start")
+        # 3. Reinicio de servicios
+        self.yui.log("Restarting Core Units: Apache & MariaDB...", "#00ccff")
+        self.run_cmd(["systemctl", "restart", "httpd", "mariadb"], use_sudo=True)
+
+        # 4. SQL Fix para phpmyadmin (Evita errores de permisos comunes)
+        sql_fix = "CREATE USER IF NOT EXISTS 'phpmyadmin'@'localhost' IDENTIFIED BY ''; " \
+                  "GRANT ALL PRIVILEGES ON phpmyadmin.* TO 'phpmyadmin'@'localhost'; FLUSH PRIVILEGES;"
+        self.run_cmd(["mariadb", "-e", sql_fix], use_sudo=True)
+
+        # 5. Despliegue de Dashboard y Permisos
+        self.setup_localhost_index()
         
-        # 4. Fix Permissions automatically
-        self.fix_http_permissions()
+        # 6. Iniciar Mailpit si no está corriendo (Silent)
+        try:
+            check_mail = subprocess.run(["pgrep", "mailpit"], capture_output=True)
+            if check_mail.returncode != 0:
+                self.yui.log("Starting Mailpit Service...", "#555")
+                subprocess.Popen(["mailpit"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except: pass
+
         self.yui.log("LINK START COMPLETE. Welcome to Aincrad.", "#00ffcc")
+        # Abrir navegador tras el éxito
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl("http://localhost"))
+
+    def al_sanear_apache(self):
+        """Inicia el proceso de saneamiento de Apache."""
+        self.yui.log("REPAIR: Iniciando secuencia de saneamiento de Apache...", "#ff7f00")
+        if hasattr(self, 'snd_click') and self.snd_click:
+            self.snd_click.play()
+        self._lanzar_hilo(self.sanear_apache_bg)
+
+    def sanear_apache_bg(self):
+        """Valida sintaxis y aplica correcciones administrativas en segundo plano."""
+        # 1. Verificar integridad de sintaxis usando apachectl
+        res = self.run_cmd(["apachectl", "-t"], use_sudo=True)
+        
+        if res and res.stderr and "Syntax error" in res.stderr:
+            error_msg = res.stderr.strip()
+            self.yui.log("CRITICAL: Error de sintaxis detectado en la configuración.", "#ff4444")
+            self.yui.log(error_msg, "#ff8888")
+            
+            # Extraer archivo y línea del error para apertura automática
+            # Ejemplo: AH00526: Syntax error on line 54 of /etc/httpd/conf/httpd.conf:
+            match = re.search(r"on line (\d+) of ([^:]+):", error_msg)
+            if match:
+                line_num = match.group(1)
+                config_file = match.group(2)
+                self.yui.log(f"REPAIR: Localizado en línea {line_num}. Abriendo archivo...", "#00ccff")
+                subprocess.run(["xdg-open", config_file])
+
+            self.yui.log("Intentando resetear estados de fallo y reiniciar...", "#555")
+            self.run_cmd(["systemctl", "reset-failed", "httpd"], use_sudo=True)
+            self.run_cmd(["systemctl", "restart", "httpd"], use_sudo=True)
+        else:
+            self.yui.log("Apache Syntax: OK.", "#00ffcc")
+            # Aplicar corrección de privilegios para phpMyAdmin (Fix SQL)
+            sql_fix = "CREATE USER IF NOT EXISTS 'phpmyadmin'@'localhost' IDENTIFIED BY ''; " \
+                      "GRANT ALL PRIVILEGES ON phpmyadmin.* TO 'phpmyadmin'@'localhost'; FLUSH PRIVILEGES;"
+            self.run_cmd(["mariadb", "-e", sql_fix], use_sudo=True)
+            self.yui.log("Secuencia de saneamiento completada con éxito.", "#00ffcc")
+            self.poll_services_status()
+
+    def al_optimizar_ram(self):
+        """Libera cachés del sistema para optimizar memoria."""
+        if not self.get_sudo_auth(): return
+        self.yui.log("MEMORY: Iniciando purga de cachés del sistema...", "#ff7f00")
+        self._lanzar_hilo(self._tarea_optimizar_ram_bg)
+
+    def _tarea_optimizar_ram_bg(self):
+        res = self.run_cmd(["sh", "-c", "sync; echo 3 > /proc/sys/vm/drop_caches"], use_sudo=True)
+        if res and res.returncode == 0:
+            self.yui.log("MEMORY: Optimización completada con éxito.", "#00ffcc")
+            gc.collect()
+            # Refrescar métricas visuales inmediatamente tras optimizar
+            QtCore.QTimer.singleShot(0, self.refresh_real_stats)
+        else:
+            self.yui.log("MEMORY: Fallo al liberar cachés (Sudo requerido).", "#ff4444")
+
+    def al_abrir_mailpit(self):
+        """Abre la interfaz web de Mailpit."""
+        self.yui.log("EMAIL: Accediendo a Mailpit (Panel de Correo)...", "#00ccff")
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl("http://localhost:8025"))
+
+    def al_vaciar_logs(self):
+        """Limpia el archivo de logs de Apache."""
+        if not self.get_sudo_auth(): return
+        self.yui.log("SYSTEM: Vaciando registros de errores de Apache...", "#ff7f00")
+        self._lanzar_hilo(self._tarea_vaciar_logs_bg)
+
+    def _tarea_vaciar_logs_bg(self):
+        res = self.run_cmd(["sh", "-c", "truncate -s 0 /var/log/httpd/error_log"], use_sudo=True)
+        if res and res.returncode == 0:
+            self.yui.log("SYSTEM: Logs de Apache reiniciados.", "#00ffcc")
+        else:
+            self.yui.log("SYSTEM: Error al vaciar logs.", "#ff4444")
+
+    def al_cambiar_php(self):
+        """Diálogo interactivo para cambiar la versión de PHP en Arch."""
+        rutas = ["/usr/bin/php*", "/usr/local/bin/php*"]
+        candidatos = []
+        for r in rutas: candidatos.extend(glob.glob(r))
+        
+        versiones = []
+        for c in candidatos:
+            nombre = os.path.basename(c)
+            if re.match(r"^php[0-9\.]*$", nombre) and nombre not in ["php-config", "phpize", "phpdbg", "php-cgi"] and os.access(c, os.X_OK):
+                versiones.append(nombre)
+        
+        versiones = sorted(list(set(versiones)))
+        if not versiones:
+            self.yui.log("PHP: No se detectaron binarios alternativos en /usr/bin/", "#ff4444")
+            return
+
+        if not self.get_sudo_auth(): return
+        ver, ok = QInputDialog.getItem(self, "PHP UNIT SELECTOR", "Seleccione motor PHP:", versiones, 0, False)
+        if ok and ver:
+            self.yui.log(f"PHP: Redirigiendo enlace binario a {ver}...", "#ff7f00")
+            self._lanzar_hilo(self._tarea_cambiar_php_bg, (ver,))
+
+    def _tarea_cambiar_php_bg(self, seleccionado):
+        cmd = f"ln -sf /usr/bin/{seleccionado} /usr/bin/php; systemctl restart httpd"
+        res = self.run_cmd(["sh", "-c", cmd], use_sudo=True)
+        if res and res.returncode == 0:
+            self._detectar_version_php()
+            self.yui.log(f"PHP: Sistema vinculado a {seleccionado} correctamente.", "#00ffcc")
+        else:
+            self.yui.log("PHP: Error al actualizar enlace. Revise privilegios.", "#ff4444")
+
+    def al_abrir_ajustes(self):
+        """Configura la carpeta raíz de proyectos y actualiza Apache."""
+        new_dir = QtWidgets.QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta Raíz (LOCALHOST)", self.dir_proyectos)
+        
+        if new_dir and new_dir != self.dir_proyectos:
+            new_dir = os.path.normpath(new_dir)
+            # Alerta de seguridad para rutas críticas
+            criticas = [os.path.expanduser("~"), "/", "/etc", "/usr", "/var"]
+            if new_dir in criticas:
+                reply = QtWidgets.QMessageBox.warning(self, "SEGURIDAD CRÍTICA", 
+                    f"Has seleccionado una ruta sensible ({new_dir}).\nEsto expondrá archivos del sistema en Apache.\n\n¿Continuar?",
+                    QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No)
+                if reply == QtWidgets.QMessageBox.StandardButton.No: return
+
+            self.dir_proyectos = new_dir
+            self.yui.log(f"SYSTEM: Raíz actualizada a {new_dir}", "#00ccff")
+            self.get_sudo_auth() # Asegurar sudo antes de reconfigurar Apache
+            self.guardar_ajustes_sao() # Guardar permanentemente de inmediato
+            self.refresh_projects()
+            self._lanzar_hilo(self.update_apache_config)
+
+    def _mostrar_popup_db_faltante(self, db_name):
+        """Detecta bases de datos faltantes en los logs y ofrece crearlas."""
+        msg = QtWidgets.QMessageBox(self)
+        msg.setWindowTitle("DATABASE ERROR")
+        msg.setText(f"Base de datos '{db_name}' no encontrada.")
+        msg.setInformativeText(f"¿Deseas que el sistema cree '{db_name}' automáticamente?")
+        msg.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No)
+        msg.setIcon(QtWidgets.QMessageBox.Icon.Question)
+        msg.setStyleSheet(SAO_GLASS_QSS)
+        
+        if msg.exec() == QtWidgets.QMessageBox.StandardButton.Yes:
+            self._lanzar_hilo(self._tarea_crear_db_rapida, (db_name,))
+
+    def _tarea_crear_db_rapida(self, nombre_db):
+        self.yui.log(f"DB: Generando base de datos '{nombre_db}'...", "#ff7f00")
+        res = self.run_cmd(["mariadb", "-e", f"CREATE DATABASE IF NOT EXISTS `{nombre_db}`;"], use_sudo=True)
+        if res and res.returncode == 0:
+            self.yui.log(f"DB: '{nombre_db}' creada con éxito.", "#00ffcc")
+        else:
+            self.yui.log(f"DB: Error al crear '{nombre_db}'.", "#ff4444")
 
     def log_out_stop(self):
         self.yui.log("LOG OUT: Terminating Units...", "#ff7f00")
+        if hasattr(self, 'snd_death') and self.snd_death:
+            self.snd_death.play()
         self.manage_service("httpd", "stop")
-        self.manage_service("mysqld", "stop")
+        self.manage_service("mariadb", "stop")
 
     def sync_repository(self):
         self.yui.log("SYNC: Checking for updates in Aincrad...", "#00ccff")
@@ -805,6 +1899,29 @@ class Kirito(QMainWindow):
         else:
             self.yui.log("REPAIR FAILED: System manual intervention required.", "#ff4444")
 
+    def hide_yui_monitor(self):
+        """Detiene el monitoreo visual y restaura el botón inicial (Adaptación)"""
+        self.yui.hide()
+        self.btn_show_yui.show()
+        self.yui.log("System Alert: Yui Terminal minimized to background.", "#ff7f00")
+
+    def show_yui_monitor(self):
+        """Restaura la terminal de logs Yui"""
+        self.btn_show_yui.hide()
+        self.yui.show()
+        self.yui.log("System Alert: Yui Terminal link restored.", "#00ffcc")
+
+    def show_yui_context_menu(self, pos):
+        """Muestra menú personalizado en la terminal embebida (Adaptación)"""
+        menu = self.yui.terminal.createStandardContextMenu()
+        menu.addSeparator()
+        
+        hide_act = menu.addAction("❌ Ocultar Monitor")
+        hide_act.triggered.connect(self.hide_yui_monitor)
+        
+        menu.setStyleSheet(SAO_GLASS_QSS)
+        menu.exec(self.yui.terminal.mapToGlobal(pos))
+
     def open_php_config(self):
         """Abre la carpeta de configuración de la versión de PHP seleccionada"""
         selected = self.php_sel.currentText()
@@ -823,7 +1940,7 @@ class Kirito(QMainWindow):
 
     def open_localhost(self):
         """Abre la raíz del localhost"""
-        path = "/srv/http/"
+        path = self.dir_proyectos
         
         if not os.path.exists(path):
             self.yui.log(f"Localhost path {path} not found. Creating...", "#ff7f00")
@@ -832,25 +1949,63 @@ class Kirito(QMainWindow):
                 self.yui.log("Failed to create directory.", "#ff4444")
                 return
         
-        self.fix_http_permissions()
-        self.yui.log(f"Accessing Localhost: {path}", "#00ccff")
+        # Reparar permisos en segundo plano para no congelar la UI al abrir carpetas pesadas
+        self._lanzar_hilo(self.fix_permissions, (path,))
+        self.yui.log(f"Syncing path permissions & opening: {path}", "#00ccff")
         subprocess.run(["xdg-open", path])
 
-    def fix_http_permissions(self):
-        """Otorga permisos al usuario actual y al grupo 'http' sobre la carpeta del servidor"""
-        self.yui.log("Granting permissions for /srv/http/...", "#ff7f00")
-        path = "/srv/http/"
-        user = getpass.getuser()
+    def open_web_localhost(self):
+        """Abre la web del localhost en el navegador"""
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl("http://localhost/"))
+
+    def update_apache_config(self):
+        """Actualiza la configuración de Apache para forzar errores en pantalla y desarrollo"""
+        self.yui.log("Neural Link: Sincronizando VirtualHost de Apache...", "#ff7f00")
+        path = self.dir_proyectos.rstrip('/')
         
-        # chown -R user:http /srv/http
-        res1 = self.run_cmd(["chown", "-R", f"{user}:http", path], True)
-        # chmod -R 775 /srv/http (Lectura/Escritura para dueño y grupo)
-        res2 = self.run_cmd(["chmod", "-R", "775", path], True)
+        conf_content = (f"<VirtualHost *:80>\n"
+                        f"    ServerAdmin webmaster@localhost\n"
+                        f"    ServerName localhost\n"
+                        f"    ServerAlias 127.0.0.1\n"
+                        f"    DocumentRoot \"{path}\"\n"
+                        f"    DirectoryIndex index.php index.html index.htm\n"
+                        f"    <Directory \"{path}\">\n"
+                        f"        Options +Indexes +FollowSymLinks +MultiViews\n"
+                        f"        AllowOverride All\n"
+                        f"        Require all granted\n"
+                        f"        # Ignorar mayúsculas/minúsculas\n"
+                        f"        CheckSpelling On\n"
+                        f"        CheckCaseOnly On\n"
+                        f"\n"
+                        f"        # Forzar errores en pantalla (Modo Desarrollo)\n"
+                        f"        AddType application/x-httpd-php .php\n"
+                        f"        php_admin_flag display_errors On\n"
+                        f"        php_admin_flag display_startup_errors On\n"
+                        f"        php_admin_value error_reporting 32767\n"
+                        f"        php_flag html_errors On\n"
+                        f"    </Directory>\n"
+                        f"\n"
+                        f"    # Garantizar que Apache reconozca y procese PHP\n"
+                        f"    <FilesMatch \\.php$>\n"
+                        f"        SetHandler application/x-httpd-php\n"
+                        f"    </FilesMatch>\n"
+                        f"\n"
+                        f"    ErrorLog /var/log/httpd/error_log\n"
+                        f"    CustomLog /var/log/httpd/access_log combined\n"
+                        f"</VirtualHost>")
         
-        if res1 and res1.returncode == 0 and res2 and res2.returncode == 0:
-            self.yui.log("PERMISSIONS FIXED: Folder is now writeable by you.", "#00ffcc")
-        else:
-            self.yui.log("Error granting permissions. Check Sudo.", "#ff4444")
+        archivo_tmp = "/tmp/sao-apache.conf"
+        try:
+            with open(archivo_tmp, "w") as f:
+                f.write(conf_content)
+            
+            cmd = (f"mkdir -p /etc/httpd/conf/extra/; "
+                   f"mv {archivo_tmp} /etc/httpd/conf/extra/000-default.conf; "
+                   f"grep -q 'Include conf/extra/000-default.conf' /etc/httpd/conf/httpd.conf || echo 'Include conf/extra/000-default.conf' >> /etc/httpd/conf/httpd.conf")
+            
+            self.run_cmd(["sh", "-c", cmd], True)
+        except Exception as e:
+            self.yui.log(f"Error al escribir config de Apache: {e}", "#ff4444")
 
     def fix_php_extensions(self):
         """Habilita automáticamente extensiones críticas en php.ini"""
@@ -930,21 +2085,22 @@ class Kirito(QMainWindow):
                 self.yui.log(f"Failed to update DB password: {error_msg}", "#ff4444")
 
     def open_selected_project(self):
-        """Abre la carpeta del proyecto seleccionado en el combo box"""
+        """Abre el proyecto seleccionado en el navegador"""
         project = self.project_sel.currentText()
-        if project and " " not in project: # Evitar mensajes de error o vacíos
-            path = os.path.join("/srv/http/", project)
-            if os.path.exists(path):
-                self.yui.log(f"Opening Project: {project}", "#00ffcc")
-                subprocess.run(["xdg-open", path])
-            else:
-                self.yui.log(f"Error: Project folder {project} not found.", "#ff4444")
+        # Filtramos los mensajes de marcador de posición que inserta refresh_projects
+        if project and project not in ["No projects detected", "Localhost root missing", ""]:
+            # 1. Abrir en el navegador web (URL local)
+            url = f"http://localhost/{project}/"
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl(url))
+            self.yui.log(f"Neural Link: Project '{project}' deployed to view.", "#00ffcc")
         else:
             self.yui.log("Please select a valid project from the index.", "#ff7f00")
 
     def refresh_real_stats(self):
+        """Métricas de sistema optimizadas para no bloquear el hilo principal"""
         try:
-            cpu = psutil.cpu_percent()
+            # interval=None hace que psutil sea no bloqueante (retorna valor desde la última llamada)
+            cpu = psutil.cpu_percent(interval=None)
             ram = psutil.virtual_memory().percent
             self.bar_cpu.setValue(int(cpu))
             self.bar_cpu.setFormat(f"CPU HEALTH: {cpu}%")
@@ -957,6 +2113,129 @@ class Kirito(QMainWindow):
             self.bar_ram.setStyleSheet(f"QProgressBar::chunk {{ background-color: {color_ram}; }}")
         except Exception as e:
             print(f"Stats Refresh Error: {e}")
+
+    def _iniciar_logica_panel(self):
+        """Punto de entrada de la lógica operativa del panel (Adaptado para PyQt6)."""
+        if not self.sudo_password:
+            self.request_sudo_password()
+        
+        # Lanzar tareas pesadas en segundo plano para evitar congelamiento inicial
+        self._lanzar_hilo(self._warmup_system_bg)
+        self._lanzar_hilo(self.refresh_projects)
+
+        # Temporizador de estado (3s para métricas, 5s para servicios)
+        self.stats_timer = QTimer(self)
+        self.stats_timer.timeout.connect(self.refresh_real_stats)
+        self.stats_timer.timeout.connect(self.poll_services_status)
+        self.stats_timer.start(5000)
+        self.refresh_real_stats()
+
+        # Verificación de actualizaciones en segundo plano
+        QTimer.singleShot(5000, lambda: self._lanzar_hilo(self._verificar_actualizaciones_bg))
+        
+        gc.collect()
+        return False
+
+    def _warmup_system_bg(self):
+        """Hilo de calentamiento para detectar versiones y dependencias sin bloquear la UI"""
+        self._detectar_version_php()
+        # Usar InvokeMethod para disparar el diálogo de dependencias en el hilo principal si es necesario
+        QtCore.QMetaObject.invokeMethod(self, "check_environment_dependencies", Qt.ConnectionType.QueuedConnection)
+
+    def poll_services_status(self):
+        """Inicia la verificación de servicios en un hilo secundario"""
+        self._lanzar_hilo(self._poll_services_worker)
+
+    def _poll_services_worker(self):
+        """Hilo trabajador que consulta systemd"""
+        status_results = {}
+        for srv in self.service_status_dots.keys():
+            res = subprocess.run(["systemctl", "is-active", srv], capture_output=True, text=True)
+            status_results[srv] = "#00ffcc" if res.stdout.strip() == "active" else "#ff4444"
+        
+        # Retornar resultados al hilo principal para actualizar la UI
+        QtCore.QMetaObject.invokeMethod(self, "_update_status_dots_ui", 
+                                      Qt.ConnectionType.QueuedConnection,
+                                      QtCore.Q_ARG(dict, status_results))
+
+    @QtCore.pyqtSlot(dict)
+    def _update_status_dots_ui(self, results):
+        """Actualiza los indicadores visuales (Solo hilo principal)"""
+        for srv, color in results.items():
+            if srv in self.service_status_dots:
+                self.service_status_dots[srv].setStyleSheet(
+                    f"background-color: {color}; border-radius: 6px; border: 1px solid white;"
+                )
+
+    @QtCore.pyqtSlot(str)
+    def _update_php_selector_ui(self, text):
+        """Actualiza el selector de PHP de forma segura (Solo hilo principal)"""
+        self.php_sel.clear()
+        self.php_sel.addItem(text)
+
+    def _obtener_pixmap(self, ruta, w, h):
+        """Retorna un QPixmap escalado desde caché para ahorrar RAM (Adaptado de GTK)."""
+        cache_key = (ruta, w, h)
+        if cache_key not in self.pixmap_cache:
+            try:
+                pixmap = QtGui.QPixmap(ruta)
+                if not pixmap.isNull():
+                    self.pixmap_cache[cache_key] = pixmap.scaled(
+                        w, h, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+                    )
+                else:
+                    return None
+            except:
+                return None
+        return self.pixmap_cache.get(cache_key)
+
+    def _detectar_version_php(self):
+        """Detecta la versión de PHP actual mediante el binario del sistema."""
+        try:
+            res = subprocess.run(["php", "-r", "echo PHP_VERSION;"], capture_output=True, text=True)
+            self.version_php_actual = res.stdout.strip()
+        except:
+            self.version_php_actual = "N/A"
+
+        # Sincronizar con la UI de forma segura
+        text = f"PHP Unit: {self.version_php_actual}" if self.version_php_actual != "N/A" else "PHP: NOT DETECTED"
+        QtCore.QMetaObject.invokeMethod(self, "_update_php_selector_ui", 
+                                      Qt.ConnectionType.QueuedConnection, 
+                                      QtCore.Q_ARG(str, text))
+        self.yui.log(f"PHP Engine: {self.version_php_actual} detected.", "#00ccff")
+
+    def conectar_cursor_mano(self, widget):
+        """Añade interactividad: cursor de mano, sonido de hover y sonido de click."""
+        widget.setCursor(Qt.CursorShape.PointingHandCursor)
+        widget.installEventFilter(self)
+        if isinstance(widget, QPushButton):
+            widget.clicked.connect(self._play_click_sound)
+
+    def eventFilter(self, obj, event):
+        """Gestiona sonidos de hover para elementos interactivos."""
+        if event.type() == QtCore.QEvent.Type.Enter:
+            if hasattr(self, 'snd_hover') and self.snd_hover:
+                self.snd_hover.stop()
+                self.snd_hover.play()
+        return super().eventFilter(obj, event)
+
+    def _play_click_sound(self):
+        """Reproduce el sonido de confirmación de SAO."""
+        if hasattr(self, 'snd_click') and self.snd_click:
+            self.snd_click.stop()
+            self.snd_click.play()
+
+    def _lanzar_hilo(self, funcion, args=()):
+        """Ejecuta tareas en segundo plano para no congelar la UI."""
+        threading.Thread(target=funcion, args=args, daemon=True).start()
+
+    def _verificar_actualizaciones_bg(self):
+        """Verifica actualizaciones de paquetes en segundo plano."""
+        # Sincronización silenciosa de pacman
+        self.run_cmd(["pacman", "-Sy"], use_sudo=True, capture=True)
+        res = subprocess.run(["pacman", "-Qu"], capture_output=True, text=True)
+        if res.returncode == 0 and res.stdout:
+            self.yui.log("System Alert: New updates detected in repositories.", "#ff7f00")
 
     def add_to_system_menu(self):
         """Crea un archivo .desktop para integrar el panel en el menú de aplicaciones de Linux"""
@@ -972,7 +2251,7 @@ class Kirito(QMainWindow):
             content = f"""[Desktop Entry]
 Name=SAO Server Panel
 Exec=python3 {script_path}
-Icon=utilities-terminal
+Icon=icon.png
 Type=Application
 Categories=Development;System;
 Terminal=false
@@ -987,35 +2266,102 @@ Terminal=false
         except Exception as e:
             self.yui.log(f"Error al crear acceso directo: {e}", "#ff4444")
 
+    def remove_from_system_menu(self):
+        desktop_path = os.path.expanduser("~/.local/share/applications/sao-server.desktop")
+        if os.path.exists(desktop_path):
+            os.remove(desktop_path)
+            self.yui.log("Acceso directo eliminado del menú.", "#ff4444")
+        else:
+            self.yui.log("No se encontró acceso directo para eliminar.", "#ff7f00")
+
+    def show_about_modal(self):
+        """Llamada a la modal de información del sistema"""
+        AboutDialog(self).exec()
+
     def show_options_menu(self):
+        t = TRANSLATIONS[self.idioma]
         menu = QMenu(self)
-        menu.setStyleSheet(SAO_GLASS_QSS)
+        # Aplicamos un estilo específico al menú para que sea coherente con el panel
+        menu.setStyleSheet("""
+            QMenu { 
+                background-color: rgba(20, 20, 30, 0.95); 
+                border: 1px solid #00ffcc; 
+                border-radius: 8px;
+                padding: 5px;
+            }
+            QMenu::item { 
+                padding: 8px 25px; 
+                color: #ffffff; 
+                border-radius: 4px; 
+            }
+            QMenu::item:selected { 
+                background-color: rgba(0, 255, 204, 0.2); 
+                color: #00ffcc; 
+            }
+            QMenu::separator { 
+                height: 1px; 
+                background: rgba(255, 255, 255, 0.1); 
+                margin: 5px 0; 
+            }
+        """)
         
-        root_act = menu.addAction("📂 Carpeta Raíz")
-        app_menu_act = menu.addAction("🖥️ Añadir al Menú de Aplicaciones")
-        php_act = menu.addAction("⚙️ Configuración PHP")
-        clear_act = menu.addAction("🧹 Limpiar Logs")
+        # Acciones mejoradas con lógica de "Añadir/Quitar"
+        root_act = menu.addAction(t["opt_root"])
+        app_menu_act = menu.addAction(t["opt_add"])
+        rm_menu_act = menu.addAction(t["opt_rm"])
+        php_act = menu.addAction(t["opt_php"])
+        hide_act = menu.addAction(t["opt_hide"])
+        sync_act = menu.addAction(t["opt_sync"])
+        clear_act = menu.addAction(t["opt_clear"])
+        lang_act = menu.addAction(t["lang_menu"])
         menu.addSeparator()
-        about_act = menu.addAction("ℹ️ Acerca de")
+        about_act = menu.addAction(t["opt_about"])
         
+        # Ejecutar menú
         action = menu.exec(self.btn_menu.mapToGlobal(QtCore.QPoint(0, self.btn_menu.height())))
         
+        # Lógica de acciones
         if action == root_act: self.open_localhost()
         elif action == app_menu_act: self.add_to_system_menu()
+        elif action == rm_menu_act: self.remove_from_system_menu() # Nueva función
         elif action == php_act: self.open_php_config()
+        elif action == hide_act: self.hide()
+        elif action == sync_act: self.sync_web_folder_action()
         elif action == clear_act: self.yui.terminal.clear()
-        elif action == about_act:
-            self.yui.log("SAO ForgeStack Panel v0.2 - Admin Interface", "#00ffcc")
-            self.yui.log("Desarrollado para la reconstrucción de Aincrad.", "#555")
+        elif action == lang_act: self.toggle_language()
+        elif action == about_act: self.show_about_modal() # Llamada a la nueva modal mejorada
+
+    def sync_web_folder_action(self):
+        """Acción de alto nivel para sincronizar configuración y permisos."""
+        if not self.get_sudo_auth(): return
+        self.yui.log("SYNC: Starting background web synchronization...", "#00ccff")
+        self._lanzar_hilo(self._tarea_sync_web_bg)
+
+    def _tarea_sync_web_bg(self):
+        """Tarea en segundo plano para evitar congelamiento durante la sincronización total"""
+        target_path = self.dir_proyectos
+        self.setup_localhost_index()
+        
+        conf_ok = self.configure_apache_for_path(target_path)
+        perm_ok = self.fix_permissions(target_path)
+        self.update_apache_config()
+        
+        if conf_ok and perm_ok:
+            self.run_cmd(["systemctl", "restart", "httpd"], use_sudo=True)
+            self.yui.log("SYNC COMPLETE: Apache is now serving the new root.", "#00ffcc")
+        else:
+            self.yui.log("SYNC ERROR: Process failed.", "#ff4444")
 
     def closeEvent(self, event):
         diag = CloseSelectionDialog(self)
         result = diag.exec()
         
         if result == 1: # Detener y Salir
+            self.guardar_ajustes_sao()
             self.log_out_stop()
             event.accept()
         elif result == 2: # Solo Salir
+            self.guardar_ajustes_sao()
             event.accept()
         else: # Cancelar
             event.ignore()
