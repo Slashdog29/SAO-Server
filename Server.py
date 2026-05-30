@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import sys
 import subprocess
 import os
@@ -29,15 +30,18 @@ def ensure_dependencies():
             missing_packages.append(package)
 
     if missing_packages:
-        print(f"\n[SYSTEM] INITIATING NEURAL LINK SYNC... (Missing: {', '.join(missing_packages)})")
         try:
             # Instalación automática usando pacman
             subprocess.run(["sudo", "pacman", "-S", "--noconfirm", "--needed"] + missing_packages, check=True)
-            print("[SUCCESS] Sync Complete. Restarting Script...\n")
-            os.execv(sys.executable, ['python'] + sys.argv)
+            os.execv(sys.executable, [sys.executable] + sys.argv)
         except Exception as e:
-            print(f"[ERROR] Sync Failed: {e}")
-            print("[HINT] Asegúrate de tener conexión a internet y privilegios de sudo.")
+            try:
+                from PyQt6.QtWidgets import QApplication, QMessageBox
+                temp_app = QApplication.instance() or QApplication(sys.argv)
+                QMessageBox.critical(None, "SAO - Neural Link Error", 
+                                     f"Critical Sync Failed: {e}\n\nAsegúrate de tener conexión a internet y privilegios de sudo.")
+            except ImportError:
+                pass
             sys.exit(1)
 
 ensure_dependencies()
@@ -45,7 +49,7 @@ ensure_dependencies()
 import psutil
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QLabel, QPushButton, QComboBox, 
+                             QHBoxLayout, QLabel, QPushButton, QComboBox, QMenu,
                              QProgressBar, QTextEdit, QFrame, QGridLayout, 
                              QInputDialog, QLineEdit, QDialog)
 from PyQt6.QtCore import Qt, QTimer, QSize
@@ -153,6 +157,17 @@ QTextEdit#YuiTerminal {
     font-size: 11px;
     border-radius: 8px;
 }
+
+QMenu {
+    background-color: rgba(15, 15, 22, 0.98);
+    border: 1px solid #00ffcc;
+    color: white;
+}
+QMenu::item { padding: 8px 25px; background: transparent; }
+QMenu::item:selected {
+    background-color: rgba(0, 255, 204, 0.2);
+    color: #00ffcc;
+}
 """
 
 class YuiMonitor(QWidget):
@@ -217,6 +232,98 @@ class DependencyDialog(QDialog):
         self.move(self.x() + delta.x(), self.y() + delta.y())
         self.oldPos = event.globalPosition().toPoint()
 
+class MissingDepsDialog(QDialog):
+    def __init__(self, missing_crit, missing_recom, parent=None):
+        super().__init__(parent)
+        self.setObjectName("DependencyDialog")
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedSize(450, 400)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(25, 25, 25, 25)
+        
+        title = QLabel("SISTEMA DE INTEGRIDAD: ESCANEO")
+        title.setStyleSheet("font-size: 16px; color: #00ffcc; font-weight: bold; letter-spacing: 1px;")
+        layout.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
+        
+        if missing_crit:
+            layout.addSpacing(10)
+            layout.addWidget(QLabel("ESTADO CRÍTICO (Faltan módulos base):", objectName="CriticalLabel"))
+            for pkg in missing_crit:
+                layout.addWidget(QLabel(f" • {pkg}"))
+        
+        if missing_recom:
+            layout.addSpacing(15)
+            layout.addWidget(QLabel("OPTIMIZACIÓN RECOMENDADA:", objectName="RecommendedLabel"))
+            for pkg in missing_recom:
+                layout.addWidget(QLabel(f" • {pkg}"))
+        
+        layout.addStretch()
+        
+        btn_layout = QHBoxLayout()
+        self.btn_ignore = QPushButton("IGNORAR")
+        self.btn_install = QPushButton("INSTALAR AUTOMÁTICAMENTE")
+        self.btn_install.setObjectName("ActionBtn")
+        
+        self.btn_ignore.clicked.connect(self.reject)
+        self.btn_install.clicked.connect(self.accept)
+        
+        btn_layout.addWidget(self.btn_ignore)
+        btn_layout.addWidget(self.btn_install)
+        layout.addLayout(btn_layout)
+
+    def mousePressEvent(self, event):
+        self.oldPos = event.globalPosition().toPoint()
+
+    def mouseMoveEvent(self, event):
+        delta = QtCore.QPoint(event.globalPosition().toPoint() - self.oldPos)
+        self.move(self.x() + delta.x(), self.y() + delta.y())
+        self.oldPos = event.globalPosition().toPoint()
+
+class CloseSelectionDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("DependencyDialog")
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedSize(400, 250)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(30, 30, 30, 30)
+        
+        title = QLabel("LOGOUT PROTOCOL")
+        title.setStyleSheet("font-size: 18px; color: #ff7f00; font-weight: bold; letter-spacing: 3px;")
+        layout.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
+        
+        msg = QLabel("Seleccione el método de desconexión del enlace neuronal:")
+        msg.setWordWrap(True)
+        msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(msg)
+        
+        layout.addStretch()
+        
+        self.btn_stop_exit = QPushButton("DETENER Y SALIR")
+        self.btn_stop_exit.setObjectName("LogOut")
+        self.btn_exit = QPushButton("SOLO SALIR")
+        self.btn_cancel = QPushButton("CANCELAR")
+        
+        self.btn_stop_exit.clicked.connect(lambda: self.done(1))
+        self.btn_exit.clicked.connect(lambda: self.done(2))
+        self.btn_cancel.clicked.connect(lambda: self.done(0))
+        
+        layout.addWidget(self.btn_stop_exit)
+        layout.addWidget(self.btn_exit)
+        layout.addWidget(self.btn_cancel)
+
+    def mousePressEvent(self, event):
+        self.oldPos = event.globalPosition().toPoint()
+
+    def mouseMoveEvent(self, event):
+        delta = QtCore.QPoint(event.globalPosition().toPoint() - self.oldPos)
+        self.move(self.x() + delta.x(), self.y() + delta.y())
+        self.oldPos = event.globalPosition().toPoint()
+
 class SudoDialog(QInputDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -233,7 +340,14 @@ class Kirito(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("SAO FORGE DIRECTORY - ARCH ADMIN")
-        self.resize(1100, 800)
+        self.setFixedSize(1100, 800)
+        
+        # Centrar la ventana en la pantalla disponible
+        qr = self.frameGeometry()
+        qr.moveCenter(QtGui.QGuiApplication.primaryScreen().availableGeometry().center())
+        self.move(qr.topLeft())
+
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
         self.sudo_password = None
@@ -267,45 +381,56 @@ class Kirito(QMainWindow):
         self.setStyleSheet(SAO_GLASS_QSS)
         self.yui.log("Neural Link Established. System Metrics: Online.", "#00ffcc")
         
-        # Ejecutar verificación de dependencias al inicio
-        QtCore.QTimer.singleShot(500, self.check_system_dependencies)
+        # Iniciar verificación de entorno tras carga
+        QTimer.singleShot(1000, self.check_environment_dependencies)
 
-    def get_sudo_auth(self):
-        if self.sudo_password:
-            return True
-        
+    def request_sudo_password(self):
+        """Muestra el diálogo SAO para obtener privilegios de administrador"""
         dialog = SudoDialog(self)
         if dialog.exec():
             password = dialog.textValue()
-            # Validar contraseña con un comando simple
-            check = subprocess.run(["sudo", "-S", "true"], input=f"{password}\n", text=True, capture_output=True, env=os.environ.copy())
+            # Validar con un comando rápido
+            check = subprocess.run(["sudo", "-S", "true"], input=f"{password}\n", text=True, capture_output=True)
             if check.returncode == 0:
                 self.sudo_password = password
-                self.yui.log("Sudo Authentication: SUCCESSFUL", "#00ffcc")
+                self.yui.log("Enlace Administrativo: AUTORIZADO", "#00ffcc")
                 return True
-            else:
-                self.yui.log("Sudo Authentication: FAILED. Invalid Password.", "#ff4444")
-                self.sudo_password = None
-                return False
+        self.yui.log("Error de Autenticación: Acceso Denegado", "#ff4444")
         return False
+
+    def run_as_sudo(self, command_list, capture=True):
+        """Ejecuta comandos usando la contraseña guardada mediante sudo -S"""
+        if not self.sudo_password and not self.request_sudo_password():
+            return None
+        
+        return subprocess.run(
+            ["sudo", "-S"] + command_list,
+            input=f"{self.sudo_password}\n",
+            capture_output=capture,
+            text=True
+        )
+
+    def mousePressEvent(self, event):
+        self.oldPos = event.globalPosition().toPoint()
+
+    def mouseMoveEvent(self, event):
+        delta = QtCore.QPoint(event.globalPosition().toPoint() - self.oldPos)
+        self.move(self.x() + delta.x(), self.y() + delta.y())
+        self.oldPos = event.globalPosition().toPoint()
+
+    def get_sudo_auth(self):
+        return self.request_sudo_password() if not self.sudo_password else True
 
     def run_cmd(self, args, use_sudo=False, capture=True):
         env = os.environ.copy()
         env["GIT_TERMINAL_PROMPT"] = "0"
         
         if use_sudo:
-            if not self.get_sudo_auth():
-                return None
-            full_cmd = ["sudo", "-S"] + args
-            input_data = f"{self.sudo_password}\n"
-        else:
-            full_cmd = args
-            input_data = None
+            return self.run_as_sudo(args, capture)
 
         try:
             result = subprocess.run(
-                full_cmd, 
-                input=input_data, 
+                args, 
                 capture_output=capture, 
                 env=env,
                 text=True
@@ -344,142 +469,166 @@ class Kirito(QMainWindow):
         # Reanudamos el monitoreo una vez cerrado el diálogo
         self.stats_timer.start(2000)
 
+    def check_environment_dependencies(self):
+        """Verifica dependencias del sistema y ofrece instalación automática"""
+        self.yui.log("Escaneando integridad del entorno local...", "#555")
+        
+        missing_crit = [p for p in self.critical_deps if subprocess.run(["pacman", "-Qi", p], capture_output=True).returncode != 0]
+        missing_recom = [p for p in self.recommended_deps if subprocess.run(["pacman", "-Qi", p], capture_output=True).returncode != 0]
+
+        if missing_crit or missing_recom:
+            diag = MissingDepsDialog(missing_crit, missing_recom, self)
+            if diag.exec():
+                self.yui.log("Iniciando despliegue de dependencias...", "#00ccff")
+                all_missing = missing_crit + missing_recom
+                res = self.run_as_sudo(["pacman", "-S", "--noconfirm", "--needed"] + all_missing)
+                
+                if res.returncode == 0:
+                    self.yui.log("Sincronización de dependencias completa.", "#00ffcc")
+                else:
+                    self.yui.log(f"Fallo en el despliegue: {res.stderr}", "#ff4444")
+
     def init_ui(self):
         main_layout = QVBoxLayout(self.container)
         main_layout.setContentsMargins(35, 35, 35, 35)
-        main_layout.setSpacing(20)
+        main_layout.setSpacing(25)
 
         # --- 1. ENCABEZADO (Métricas y Carpeta) ---
         header = QHBoxLayout()
         title_vbox = QVBoxLayout()
-        title = QLabel("SAO DIRECTORY v0.2 Beta/ SERVERS")
-        title.setStyleSheet("font-size: 24px; font-weight: 900; letter-spacing: 5px;")
+        
+        # Título y Botones de Sistema (⋮ y X)
+        title_row = QHBoxLayout()
+        title = QLabel("SAO DIRECTORY v0.3 / SERVERS")
+        title.setStyleSheet("font-size: 22px; font-weight: 900; letter-spacing: 4px; color: #00ffcc;")
+        
+        self.btn_menu = QPushButton("⋮")
+        self.btn_menu.setFixedSize(35, 35)
+        self.btn_menu.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_menu.clicked.connect(self.show_options_menu)
 
-        self.btn_php_folder = QPushButton("⚙️ Config PHP")
-        self.btn_php_folder.setObjectName("FolderBtn")
+        self.btn_close = QPushButton("✕")
+        self.btn_close.setFixedSize(35, 35)
+        self.btn_close.setObjectName("LogOut")
+        self.btn_close.clicked.connect(self.close)
+
+        title_row.addWidget(title)
+        title_row.addStretch()
+        title_row.addWidget(self.btn_menu)
+        title_row.addWidget(self.btn_close)
+
+        # Accesos directos rápidos
+        nav_row = QHBoxLayout()
+        self.btn_php_folder = QPushButton("⚙️ CONFIG PHP"); self.btn_php_folder.setObjectName("FolderBtn")
+        self.btn_localhost = QPushButton("🌐 LOCALHOST ROOT"); self.btn_localhost.setObjectName("FolderBtn")
         self.btn_php_folder.clicked.connect(self.open_php_config)
-
-        self.btn_localhost = QPushButton("🌐 Localhost Root")
-        self.btn_localhost.setObjectName("FolderBtn")
         self.btn_localhost.clicked.connect(self.open_localhost)
+        
+        nav_row.addWidget(self.btn_php_folder)
+        nav_row.addWidget(self.btn_localhost)
+        nav_row.addStretch()
 
-        title_vbox.addWidget(title)
-        title_vbox.addLayout(self._create_header_buttons())
+        title_vbox.addLayout(title_row)
+        title_vbox.addLayout(nav_row)
 
         stats_grid = QGridLayout()
         self.bar_cpu = QProgressBar()
         self.bar_ram = QProgressBar()
-
-        stats_grid.addWidget(QLabel("CPU HEALTH:"), 0, 0)
-        stats_grid.addWidget(self.bar_cpu, 0, 1)
-        stats_grid.addWidget(QLabel("RAM ENERGY:"), 1, 0)
-        stats_grid.addWidget(self.bar_ram, 1, 1)
+        stats_grid.addWidget(QLabel("CPU:"), 0, 0); stats_grid.addWidget(self.bar_cpu, 0, 1)
+        stats_grid.addWidget(QLabel("RAM:"), 1, 0); stats_grid.addWidget(self.bar_ram, 1, 1)
 
         header.addLayout(title_vbox, 55)
         header.addLayout(stats_grid, 45)
         main_layout.addLayout(header)
 
-        # --- 2. SELECTORES DE INVENTARIO (PHP DINÁMICO) ---
+        # --- 2. SELECTORES DE ENTORNO ---
         inv_frame = QFrame()
         inv_frame.setObjectName("GlassCard")
         inv_layout = QVBoxLayout(inv_frame)
         
-        selectors_row = QHBoxLayout()
         self.php_sel = QComboBox()
-        self.db_sel = QComboBox()
-        self.db_sel.addItems(["MySQL 8.0", "PostgreSQL", "MariaDB"])
-        
-        selectors_row.addWidget(QLabel("PHP:"))
-        selectors_row.addWidget(self.php_sel)
-        selectors_row.addSpacing(20)
-        selectors_row.addWidget(QLabel("DB:"))
-        selectors_row.addWidget(self.db_sel)
-        selectors_row.addStretch()
-
-        project_row = QHBoxLayout()
         self.project_sel = QComboBox()
-        self.btn_open_project = QPushButton("🚀 Open Project")
-        self.btn_open_project.setObjectName("ProjectBtn")
+        self.btn_open_project = QPushButton("🚀 OPEN PROJECT"); self.btn_open_project.setObjectName("ProjectBtn")
         self.btn_open_project.clicked.connect(self.open_selected_project)
         
-        project_row.addWidget(QLabel("PROJECT INDEX:"))
-        project_row.addWidget(self.project_sel, 1)
-        project_row.addWidget(self.btn_open_project)
-
-        inv_layout.addLayout(selectors_row)
-        inv_layout.addLayout(project_row)
+        sel_row = QHBoxLayout()
+        sel_row.addWidget(QLabel("PHP UNIT:")); sel_row.addWidget(self.php_sel, 1)
+        sel_row.addWidget(QLabel("PROJECT:")); sel_row.addWidget(self.project_sel, 2)
+        sel_row.addWidget(self.btn_open_project)
+        inv_layout.addLayout(sel_row)
         main_layout.addWidget(inv_frame)
 
-        # --- 3. SERVICIOS Y ACCIONES GLOBALES ---
+        # --- 3. SERVICES & SYSTEM TOOLS ---
         mid_layout = QHBoxLayout()
-        serv_vbox = QVBoxLayout()
-        self.row_kirito = self.create_service_row("Kirito Unit (Apache)", "httpd")
-        self.row_asuna = self.create_service_row("Asuna Unit (MariaDB)", "mysqld")
         
-        global_btns = QHBoxLayout()
-        self.btn_link_start = QPushButton("⚡ LINK START")
-        self.btn_link_start.setObjectName("LinkStart")
-        self.btn_link_start.setFixedHeight(50)
+        # Panel de Servicios
+        serv_panel = QVBoxLayout()
+        serv_panel.addWidget(self.create_service_row("Apache Server", "httpd"))
+        serv_panel.addWidget(self.create_service_row("MariaDB Engine", "mysqld"))
+        
+        btn_row = QHBoxLayout()
+        self.btn_link_start = QPushButton("⚡ LINK START"); self.btn_link_start.setObjectName("LinkStart")
+        self.btn_log_out = QPushButton("🛑 LOG OUT"); self.btn_log_out.setObjectName("LogOut")
+        self.btn_link_start.setFixedHeight(45); self.btn_log_out.setFixedHeight(45)
         self.btn_link_start.clicked.connect(self.link_start_init)
-        
-        self.btn_log_out = QPushButton("🛑 LOG OUT")
-        self.btn_log_out.setObjectName("LogOut")
-        self.btn_log_out.setFixedHeight(50)
         self.btn_log_out.clicked.connect(self.log_out_stop)
         
-        global_btns.addWidget(self.btn_link_start)
-        global_btns.addWidget(self.btn_log_out)
+        btn_row.addWidget(self.btn_link_start)
+        btn_row.addWidget(self.btn_log_out)
+        serv_panel.addLayout(btn_row)
+        mid_layout.addLayout(serv_panel, 60)
 
-        serv_vbox.addWidget(self.row_kirito)
-        serv_vbox.addWidget(self.row_asuna)
-        serv_vbox.addLayout(global_btns)
-        mid_layout.addLayout(serv_vbox, 65)
-
+        # Panel de Herramientas (Grid)
         tools_frame = QFrame()
         tools_frame.setObjectName("GlassCard")
         t_grid = QGridLayout(tools_frame)
+        t_grid.setSpacing(10)
         
-        btn_fix = QPushButton("Fix Apache")
-        btn_verify = QPushButton("Verify DB")
-        btn_repair = QPushButton("Repair Panel")
-        btn_sync = QPushButton("🔄 Sync")
-        btn_perms = QPushButton("Fix Perms")
-        btn_db_test = QPushButton("Test DB Conn")
-        btn_db_user = QPushButton("DB User")
-        btn_db_pass = QPushButton("DB Password")
-        btn_php_ext = QPushButton("Fix PHP Exts")
-        
-        btn_sync.clicked.connect(self.sync_repository)
-        btn_repair.clicked.connect(self.repair_panel)
-        btn_fix.clicked.connect(lambda: self.run_cmd(["systemctl", "reset-failed", "httpd"], True))
-        btn_verify.clicked.connect(lambda: self.run_cmd(["mariadb-check", "--all-databases"], True))
-        btn_perms.clicked.connect(self.fix_http_permissions)
-        btn_db_test.clicked.connect(self.test_db_connection)
-        btn_db_user.clicked.connect(self.manage_db_user)
-        btn_db_pass.clicked.connect(self.change_db_password)
-        btn_php_ext.clicked.connect(self.fix_php_extensions)
+        label_tools = QLabel("SYSTEM MAINTENANCE"); label_tools.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label_tools.setStyleSheet("color: #555; font-size: 9px; font-weight: bold;")
+        t_grid.addWidget(label_tools, 0, 0, 1, 2)
 
-        t_grid.addWidget(btn_fix, 0, 0)
-        t_grid.addWidget(btn_verify, 0, 1)
-        t_grid.addWidget(btn_repair, 1, 0)
-        t_grid.addWidget(btn_sync, 1, 1)
-        t_grid.addWidget(btn_perms, 2, 0, 1, 2)
-        t_grid.addWidget(btn_db_test, 3, 0)
-        t_grid.addWidget(btn_db_user, 3, 1)
-        t_grid.addWidget(btn_db_pass, 4, 0)
-        t_grid.addWidget(btn_php_ext, 4, 1)
+        # Implementación de botones solicitados
+        tools = [
+            ("Fix Apache", lambda: self.run_cmd(["systemctl", "reset-failed", "httpd"], True)),
+            ("Verify DB", lambda: self.run_cmd(["mariadb-check", "--all-databases"], True)),
+            ("Fix Perms", self.fix_http_permissions),
+            ("Sync", self.sync_repository),
+            ("Repair Panel", self.repair_panel)
+        ]
 
-        mid_layout.addWidget(tools_frame, 35)
+        for i, (name, func) in enumerate(tools):
+            btn = QPushButton(name)
+            btn.setFixedSize(120, 35)
+            btn.clicked.connect(func)
+            t_grid.addWidget(btn, (i // 2) + 1, i % 2)
+
+        mid_layout.addWidget(tools_frame, 40)
         main_layout.addLayout(mid_layout)
 
-        # --- 4. TERMINAL YUI ---
         main_layout.addWidget(self.yui)
+        
+    def manage_service(self, service, action, ask_sudo=True):
+        """Versión mejorada: Permite ejecución silenciosa en LOG OUT"""
+        self.yui.log(f"Requesting {action.upper()} for {service}...", "#ff7f00")
+        if ask_sudo:
+            res = self.run_cmd(["systemctl", action, service], True)
+        else:
+            # Intento silencioso para el cierre de app
+            if self.sudo_password:
+                res = subprocess.run(["sudo", "-S", "systemctl", action, service], 
+                                     input=f"{self.sudo_password}\n", text=True, capture_output=True)
+            else:
+                res = subprocess.run(["sudo", "-n", "systemctl", action, service], capture_output=True)
+        
+        if res and res.returncode == 0:
+            self.yui.log(f"Service {service} updated.", "#00ffcc")
 
-    def _create_header_buttons(self):
-        layout = QHBoxLayout()
-        layout.addWidget(self.btn_php_folder)
-        layout.addWidget(self.btn_localhost)
-        return layout
+    def log_out_stop(self):
+        """Detiene servicios sin pedir clave si no está guardada"""
+        self.yui.log("LOG OUT: Terminating Units (Silent Mode)...", "#ff7f00")
+        self.manage_service("httpd", "stop", ask_sudo=False)
+        self.manage_service("mysqld", "stop", ask_sudo=False)
 
     def detect_php_versions(self):
         """Escanea /etc/ en busca de directorios de PHP instalados (estándar en Arch)"""
@@ -710,7 +859,7 @@ class Kirito(QMainWindow):
         
         if os.path.exists(php_ini):
             # Descomenta las extensiones y asegura que el directorio de extensiones sea correcto
-            cmd = ["sed", "-i", "-E", "s/^\s*;\s*extension\s*=\s*(mysqli|pdo_mysql|mbstring)/extension=\\1/g", php_ini]
+            cmd = ["sed", "-i", "-E", r"s/^\s*;\s*extension\s*=\s*(mysqli|pdo_mysql|mbstring)/extension=\1/g", php_ini]
             res = self.run_cmd(cmd, True)
             
             if res and res.returncode == 0:
@@ -808,6 +957,68 @@ class Kirito(QMainWindow):
             self.bar_ram.setStyleSheet(f"QProgressBar::chunk {{ background-color: {color_ram}; }}")
         except Exception as e:
             print(f"Stats Refresh Error: {e}")
+
+    def add_to_system_menu(self):
+        """Crea un archivo .desktop para integrar el panel en el menú de aplicaciones de Linux"""
+        try:
+            script_path = os.path.abspath(__file__)
+            desktop_dir = os.path.expanduser("~/.local/share/applications/")
+            
+            # Asegurar que el directorio existe
+            os.makedirs(desktop_dir, exist_ok=True)
+            
+            file_path = os.path.join(desktop_dir, "sao-server.desktop")
+            
+            content = f"""[Desktop Entry]
+Name=SAO Server Panel
+Exec=python3 {script_path}
+Icon=utilities-terminal
+Type=Application
+Categories=Development;System;
+Terminal=false
+"""
+            with open(file_path, "w") as f:
+                f.write(content)
+            
+            # Otorgar permisos de ejecución al archivo .desktop
+            os.chmod(file_path, 0o755)
+            
+            self.yui.log("Acceso directo creado en el menú", "#00ffcc")
+        except Exception as e:
+            self.yui.log(f"Error al crear acceso directo: {e}", "#ff4444")
+
+    def show_options_menu(self):
+        menu = QMenu(self)
+        menu.setStyleSheet(SAO_GLASS_QSS)
+        
+        root_act = menu.addAction("📂 Carpeta Raíz")
+        app_menu_act = menu.addAction("🖥️ Añadir al Menú de Aplicaciones")
+        php_act = menu.addAction("⚙️ Configuración PHP")
+        clear_act = menu.addAction("🧹 Limpiar Logs")
+        menu.addSeparator()
+        about_act = menu.addAction("ℹ️ Acerca de")
+        
+        action = menu.exec(self.btn_menu.mapToGlobal(QtCore.QPoint(0, self.btn_menu.height())))
+        
+        if action == root_act: self.open_localhost()
+        elif action == app_menu_act: self.add_to_system_menu()
+        elif action == php_act: self.open_php_config()
+        elif action == clear_act: self.yui.terminal.clear()
+        elif action == about_act:
+            self.yui.log("SAO ForgeStack Panel v0.2 - Admin Interface", "#00ffcc")
+            self.yui.log("Desarrollado para la reconstrucción de Aincrad.", "#555")
+
+    def closeEvent(self, event):
+        diag = CloseSelectionDialog(self)
+        result = diag.exec()
+        
+        if result == 1: # Detener y Salir
+            self.log_out_stop()
+            event.accept()
+        elif result == 2: # Solo Salir
+            event.accept()
+        else: # Cancelar
+            event.ignore()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
