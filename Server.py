@@ -405,7 +405,7 @@ class SudoDialog(QDialog):
 
         # Imagen lateral (sao.png)
         self.img_label = QLabel()
-        path_img = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sao.png")
+        path_img = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "sao.png")
         if os.path.exists(path_img):
             pixmap = QtGui.QPixmap(path_img).scaled(140, 140, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             self.img_label.setPixmap(pixmap)
@@ -835,7 +835,7 @@ class Kirito(QMainWindow):
         self.tray_icon = QtWidgets.QSystemTrayIcon(self)
         
         # Usar sao.png como icono de bandeja
-        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sao.png")
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "sao.png")
         if os.path.exists(icon_path):
             icon = QtGui.QIcon(icon_path)
             self.tray_icon.setIcon(icon)
@@ -866,7 +866,7 @@ class Kirito(QMainWindow):
     def setup_audio(self):
         """Inicializa los efectos de sonido del sistema SAO"""
         def init_player(filename, loop=False, volume=0.5):
-            path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+            path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", filename)
             if not os.path.exists(path):
                 return None
             
@@ -2247,11 +2247,12 @@ footer { margin-top: 50px; text-align: center; font-size: 11px; color: #667788; 
             os.makedirs(desktop_dir, exist_ok=True)
             
             file_path = os.path.join(desktop_dir, "sao-server.desktop")
+            icon_path = os.path.join(os.path.dirname(script_path), "assets", "icon.png")
             
             content = f"""[Desktop Entry]
 Name=SAO Server Panel
 Exec=python3 {script_path}
-Icon=icon.png
+Icon={icon_path}
 Type=Application
 Categories=Development;System;
 Terminal=false
