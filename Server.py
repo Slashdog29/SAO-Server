@@ -2,6 +2,7 @@
 import sys
 import subprocess
 import os
+import shutil
 import time
 import threading
 import gc
@@ -237,6 +238,8 @@ TRANSLATIONS = {
         "opt_rm": "❌ Remove from Menu",
         "opt_php": "⚙️ PHP Config",
         "opt_clear": "🧹 Clear Logs",
+        "opt_update_panel": "🔼 Update Panel",
+        "opt_repair_panel": "🛠️ Repair Panel",
         "opt_about": "ℹ️ About",
         "opt_hide": "👻 Hide Panel",
         "opt_sync": "🔄 Sync Web Folder",
@@ -263,6 +266,8 @@ TRANSLATIONS = {
         "opt_rm": "❌ Quitar del Menú",
         "opt_php": "⚙️ Configuración PHP",
         "opt_clear": "🧹 Limpiar Logs",
+        "opt_update_panel": "🔼 Actualizar Panel",
+        "opt_repair_panel": "🛠️ Reparar Panel",
         "opt_about": "ℹ️ Acerca de",
         "opt_hide": "👻 Ocultar Panel",
         "opt_sync": "🔄 Sincronizar Carpeta Web",
@@ -2242,17 +2247,26 @@ footer { margin-top: 50px; text-align: center; font-size: 11px; color: #667788; 
         try:
             script_path = os.path.abspath(__file__)
             desktop_dir = os.path.expanduser("~/.local/share/applications/")
+            icon_src = os.path.join(os.path.dirname(script_path), "assets", "icon.png")
+            icon_theme_dir = os.path.expanduser("~/.local/share/icons/hicolor/128x128/apps/")
             
-            # Asegurar que el directorio existe
+            # Asegurar que los directorios existen
             os.makedirs(desktop_dir, exist_ok=True)
+            os.makedirs(icon_theme_dir, exist_ok=True)
+            
+            if os.path.exists(icon_src):
+                icon_dest = os.path.join(icon_theme_dir, "sao-server.png")
+                if not os.path.exists(icon_dest) or os.path.getmtime(icon_src) != os.path.getmtime(icon_dest):
+                    shutil.copy2(icon_src, icon_dest)
+                icon_entry = "sao-server"
+            else:
+                icon_entry = icon_src
             
             file_path = os.path.join(desktop_dir, "sao-server.desktop")
-            icon_path = os.path.join(os.path.dirname(script_path), "assets", "icon.png")
-            
             content = f"""[Desktop Entry]
 Name=SAO Server Panel
 Exec=python3 {script_path}
-Icon={icon_path}
+Icon={icon_entry}
 Type=Application
 Categories=Development;System;
 Terminal=false
@@ -2313,6 +2327,8 @@ Terminal=false
         php_act = menu.addAction(t["opt_php"])
         hide_act = menu.addAction(t["opt_hide"])
         sync_act = menu.addAction(t["opt_sync"])
+        update_act = menu.addAction(t["opt_update_panel"])
+        repair_act = menu.addAction(t["opt_repair_panel"])
         clear_act = menu.addAction(t["opt_clear"])
         lang_act = menu.addAction(t["lang_menu"])
         menu.addSeparator()
@@ -2328,6 +2344,8 @@ Terminal=false
         elif action == php_act: self.open_php_config()
         elif action == hide_act: self.hide()
         elif action == sync_act: self.sync_web_folder_action()
+        elif action == update_act: self.sync_repository()
+        elif action == repair_act: self.repair_panel()
         elif action == clear_act: self.yui.terminal.clear()
         elif action == lang_act: self.toggle_language()
         elif action == about_act: self.show_about_modal() # Llamada a la nueva modal mejorada
