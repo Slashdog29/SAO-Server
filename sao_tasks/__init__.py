@@ -1,1 +1,1 @@
-from . import update_task, repair_task, auth_task, version_info
+from . import update_task, repair_task, auth_task, version_info, about_dialog
