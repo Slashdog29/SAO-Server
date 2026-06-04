@@ -65,7 +65,7 @@ from PyQt6.QtCore import Qt, QTimer, QSize, QUrl
 from PyQt6.QtGui import QFont, QColor
 
 # Tasks refactor
-from sao_tasks import update_task, repair_task
+from sao_tasks import update_task, repair_task, auth_task, version_info
 
 # --- DISEÑO GLASS-SAO PREMIUM (QSS) ---
 SAO_GLASS_QSS = """
@@ -242,6 +242,7 @@ TRANSLATIONS = {
         "opt_php": "⚙️ PHP Config",
         "opt_clear": "🧹 Clear Logs",
         "opt_update_panel": "🔼 Update Panel",
+        "opt_save_token": "🔐 Save Git Token",
         "opt_repair_panel": "🛠️ Repair Panel",
         "opt_about": "ℹ️ About",
         "opt_hide": "👻 Hide Panel",
@@ -270,6 +271,7 @@ TRANSLATIONS = {
         "opt_php": "⚙️ Configuración PHP",
         "opt_clear": "🧹 Limpiar Logs",
         "opt_update_panel": "🔼 Actualizar Panel",
+        "opt_save_token": "🔐 Guardar Token Git",
         "opt_repair_panel": "🛠️ Reparar Panel",
         "opt_about": "ℹ️ Acerca de",
         "opt_hide": "👻 Ocultar Panel",
@@ -599,6 +601,15 @@ class AboutDialog(QDialog):
         link_label = QLabel("<a href='https://github.com/Slashdog29/SAO-Server' style='color: #00ffcc; text-decoration: none;'>github.com/Slashdog29/SAO-Server</a>")
         link_label.setOpenExternalLinks(True)
         link_label.setStyleSheet("font-size: 11px;")
+        # Mostrar versión del panel usando el módulo sao_tasks.version_info
+        try:
+            vi = version_info.get_panel_info()
+            ver_txt = f"Version: {vi.get('version','n/a')} | {vi.get('branch','')}@{vi.get('commit','') or 'n/a'}"
+            ver_label = QLabel(ver_txt)
+            ver_label.setStyleSheet("font-size: 11px; color: #00ffcc;")
+            info_vbox.addWidget(ver_label)
+        except Exception:
+            pass
         
         info_vbox.addWidget(creator_label)
         info_vbox.addWidget(link_label)
@@ -1882,6 +1893,24 @@ footer { margin-top: 50px; text-align: center; font-size: 11px; color: #667788; 
         else:
             self.yui.log("REPAIR FAILED: System manual intervention required.", "#ff4444")
 
+    def save_git_token_dialog(self):
+        """Muestra un diálogo para ingresar y guardar el token de GitHub de forma segura."""
+        t = TRANSLATIONS[self.idioma]
+        prompt = "Introduce tu Personal Access Token de GitHub (se guardará en ~/.sao_server_token):"
+        token, ok = QInputDialog.getText(self, t.get("opt_save_token", "Save Token"), prompt, QLineEdit.EchoMode.Password)
+        if not ok:
+            self.yui.log("Token not saved (cancelled).", "#ffbb33")
+            return
+        token = token.strip()
+        if not token:
+            self.yui.log("Empty token — not saved.", "#ffbb33")
+            return
+        res = auth_task.save_token(token)
+        if res:
+            self.yui.log("Token saved to ~/.sao_server_token (mode 600).", "#00ffcc")
+        else:
+            self.yui.log("Failed to save token.", "#ff4444")
+
     def hide_yui_monitor(self):
         """Detiene el monitoreo visual y restaura el botón inicial (Adaptación)"""
         self.yui.hide()
@@ -2306,6 +2335,7 @@ Terminal=false
         hide_act = menu.addAction(t["opt_hide"])
         sync_act = menu.addAction(t["opt_sync"])
         update_act = menu.addAction(t["opt_update_panel"])
+        save_token_act = menu.addAction(t["opt_save_token"])
         repair_act = menu.addAction(t["opt_repair_panel"])
         clear_act = menu.addAction(t["opt_clear"])
         lang_act = menu.addAction(t["lang_menu"])
@@ -2323,6 +2353,7 @@ Terminal=false
         elif action == hide_act: self.hide()
         elif action == sync_act: self.sync_web_folder_action()
         elif action == update_act: self.sync_repository()
+        elif action == save_token_act: self.save_git_token_dialog()
         elif action == repair_act: self.repair_panel()
         elif action == clear_act: self.yui.terminal.clear()
         elif action == lang_act: self.toggle_language()
