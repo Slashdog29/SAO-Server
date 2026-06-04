@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=SAO Server Panel
+Comment=Launch SAO Server Panel
+Exec=%u
+Icon=sao-server
+Terminal=false
+Type=Application
+Categories=Development;System;
+StartupNotify=false

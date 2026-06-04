@@ -1081,7 +1081,7 @@ class Kirito(QMainWindow):
     def actualizar_icono_favorito(self):
         """Cambia el icono de la estrella según si el proyecto es favorito o no"""
         proyecto = self.project_sel.currentText()
- 2       if proyecto in self.favoritos:
+        if proyecto in self.favoritos:
             self.btn_fav.setText("★")
         else:
             self.btn_fav.setText("☆")
@@ -2132,14 +2132,33 @@ footer { margin-top: 50px; text-align: center; font-size: 11px; color: #667788; 
                 icon_dest = os.path.join(icon_theme_dir, "sao-server.png")
                 if not os.path.exists(icon_dest) or os.path.getmtime(icon_src) != os.path.getmtime(icon_dest):
                     shutil.copy2(icon_src, icon_dest)
-                icon_entry = "sao-server"
+                # Use absolute path so DE picks it up immediately without theme cache
+                icon_entry = icon_dest
+                # Try to update icon cache (best effort)
+                try:
+                    if shutil.which('gtk-update-icon-cache'):
+                        subprocess.run(['gtk-update-icon-cache', '-f', '-t', os.path.expanduser('~/.local/share/icons/hicolor')], check=False)
+                except Exception:
+                    pass
             else:
                 icon_entry = icon_src
             
             file_path = os.path.join(desktop_dir, "sao-server.desktop")
+            # Prefer a local launcher wrapper if present so double-click runs without terminal
+            wrapper = os.path.join(os.path.dirname(script_path), "sao-launcher.sh")
+            if os.path.exists(wrapper):
+                # Ensure wrapper is executable so desktop environments don't open a terminal
+                try:
+                    os.chmod(wrapper, 0o755)
+                except Exception:
+                    pass
+                exec_entry = wrapper
+            else:
+                # Use setsid via shell to avoid terminal sticking open when wrapper absent
+                exec_entry = f"sh -c 'setsid python3 {script_path} >/dev/null 2>&1 &'"
             content = f"""[Desktop Entry]
 Name=SAO Server Panel
-Exec=python3 {script_path}
+Exec={exec_entry}
 Icon={icon_entry}
 Type=Application
 Categories=Development;System;
@@ -2148,8 +2167,18 @@ Terminal=false
             with open(file_path, "w") as f:
                 f.write(content)
             
-            # Otorgar permisos de ejecución al archivo .desktop
-            os.chmod(file_path, 0o755)
+            # Otorgar permisos de ejecución al archivo .desktop (algunos DE requieren el bit ejecutable)
+            try:
+                os.chmod(file_path, 0o755)
+            except Exception:
+                pass
+
+            # Actualizar base de datos de escritorio (best-effort)
+            try:
+                if shutil.which('update-desktop-database'):
+                    subprocess.run(['update-desktop-database', desktop_dir], check=False)
+            except Exception:
+                pass
             
             self.yui.log("Acceso directo creado en el menú", "#00ffcc")
         except Exception as e:
