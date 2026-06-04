@@ -227,7 +227,7 @@ QMenu::item:selected {
 TRANSLATIONS = {
     "EN": {
         "title": "SAO FORGE DIRECTORY - ARCH ADMIN",
-        "header_title": "SAO DIRECTORY v0.6 / SERVERS",
+        "header_title": "SAO DIRECTORY / SERVERS",
         "php_unit": "PHP UNIT:",
         "project": "PROJECT:",
         "maintenance": "SYSTEM MAINTENANCE",
@@ -256,7 +256,7 @@ TRANSLATIONS = {
     },
     "ES": {
         "title": "DIRECTORIO SAO FORGE - ADMIN ARCH",
-        "header_title": "DIRECTORIO SAO v0.3 / SERVIDORES",
+        "header_title": "DIRECTORIO SAO / SERVIDORES",
         "php_unit": "UNIDAD PHP:",
         "project": "PROYECTO:",
         "maintenance": "MANTENIMIENTO DEL SISTEMA",
@@ -861,7 +861,8 @@ class Kirito(QMainWindow):
         
         # Título y Botones de Sistema (⋮ y X)
         title_row = QHBoxLayout()
-        self.title_lbl = QLabel("SAO DIRECTORY v0.3 / SERVERS")
+        # El texto base del encabezado proviene de las traducciones; la versión se añade dinámicamente
+        self.title_lbl = QLabel(TRANSLATIONS[self.idioma]["header_title"])
         self.title_lbl.setStyleSheet("font-size: 22px; font-weight: 900; letter-spacing: 4px; color: #00ffcc;")
         
         self.btn_menu = QPushButton("⋮")
