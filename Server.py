@@ -617,7 +617,16 @@ class Kirito(QMainWindow):
         """Actualiza todos los textos de la interfaz según el idioma seleccionado"""
         t = TRANSLATIONS[self.idioma]
         self.setWindowTitle(t["title"])
-        self.title_lbl.setText(t["header_title"])
+        # Mostrar título base y añadir versión dinámica (controlada por user via VERSION or tag)
+        header = t["header_title"]
+        try:
+            vi = version_info.get_panel_info()
+            ver = vi.get("version") or vi.get("commit")
+            if ver:
+                header = f"{header} — {ver}"
+        except Exception:
+            pass
+        self.title_lbl.setText(header)
         self.lbl_php_unit.setText(t["php_unit"])
         self.lbl_project.setText(t["project"])
         self.btn_open_project.setText(t["open_proj"])

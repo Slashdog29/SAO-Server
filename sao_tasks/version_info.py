@@ -27,10 +27,22 @@ def get_panel_info(repo_path=None):
         "timestamp": datetime.utcnow().isoformat() + "Z",
     }
 
-    # Tags / version
-    ver = _run_git(["git", "describe", "--tags", "--always"], repo_root)
-    if ver:
-        info["version"] = ver
+    # Prefer explicit VERSION file or environment override so the user can control displayed version
+    version_file = os.path.join(repo_root, "VERSION")
+    env_ver = os.environ.get("SAO_PANEL_VERSION")
+    if env_ver:
+        info["version"] = env_ver
+    elif os.path.exists(version_file):
+        try:
+            with open(version_file, "r") as vf:
+                info["version"] = vf.read().strip()
+        except Exception:
+            info["version"] = None
+    else:
+        # Tags / version from git
+        ver = _run_git(["git", "describe", "--tags", "--always"], repo_root)
+        if ver:
+            info["version"] = ver
 
     # Commit
     commit = _run_git(["git", "rev-parse", "--short", "HEAD"], repo_root)
