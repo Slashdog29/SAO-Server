@@ -64,6 +64,9 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt6.QtCore import Qt, QTimer, QSize, QUrl
 from PyQt6.QtGui import QFont, QColor
 
+# Tasks refactor
+from sao_tasks import update_task, repair_task
+
 # --- DISEÑO GLASS-SAO PREMIUM (QSS) ---
 SAO_GLASS_QSS = """
 QMainWindow { background-color: transparent; }
@@ -1852,54 +1855,29 @@ footer { margin-top: 50px; text-align: center; font-size: 11px; color: #667788; 
         self.manage_service("mariadb", "stop")
 
     def sync_repository(self):
-        self.yui.log("SYNC: Checking for updates in Aincrad...", "#00ccff")
-        
-        # Verificar si es un repo git
-        if self.run_cmd(["git", "rev-parse", "--is-inside-work-tree"]).returncode != 0:
-            self.yui.log("Error: Current directory is not a Git repository.", "#ff4444")
-            return
+        """Wrapper que usa `sao_tasks.update_task.run_update` para actualizar.
+        Ejecuta `scripts/update.sh` si está disponible, o fallback a git pull.
+        """
+        self.yui.log("SYNC: Running update task...", "#00ffcc")
+        repo_path = os.path.dirname(os.path.abspath(__file__))
+        res = update_task.run_update(repo_path=repo_path, logger=getattr(self.yui, 'log', None))
 
-        # Asegurar URL SSH
-        self.run_cmd(["git", "remote", "set-url", "origin", self.git_repo_url])
-        
-        # Fetch
-        self.yui.log("Fetching remote data...", "#555")
-        fetch = self.run_cmd(["git", "fetch"])
-        
-        if fetch and fetch.returncode == 0:
-            local = self.run_cmd(["git", "rev-parse", "HEAD"]).stdout.strip()
-            remote = self.run_cmd(["git", "rev-parse", "@{u}"]).stdout.strip()
-            
-            if local != remote:
-                self.yui.log("NEW UPDATE DETECTED. Pulling changes...", "#ff7f00")
-                pull = self.run_cmd(["git", "pull"])
-                if pull.returncode == 0:
-                    self.yui.log("System updated to latest version.", "#00ffcc")
-                else:
-                    self.yui.log(f"Pull failed: {pull.stderr}", "#ff4444")
-            else:
-                self.yui.log("System is already up to date.", "#00ffcc")
+        # Compatible con subprocess.CompletedProcess y otros retornos
+        code = getattr(res, 'returncode', 0) if res is not None else 0
+        if code == 0:
+            self.yui.log("System updated to latest version.", "#00ffcc")
         else:
-            self.yui.log("Sync failed. Check SSH keys and connection.", "#ff4444")
+            self.yui.log("Update failed. Check logs and connection.", "#ff4444")
 
     def repair_panel(self):
+        """Wrapper que delega la reparación en `sao_tasks.repair_task.repair_panel`.
+        Mantiene la interfaz `self.yui.log` para registrar progreso.
+        """
         self.yui.log("REPAIR: Initiating integrity recovery...", "#ff7f00")
-        
-        if self.run_cmd(["git", "rev-parse", "--is-inside-work-tree"]).returncode != 0:
-            self.yui.log("Fatal: Not a git repository. Repair aborted.", "#ff4444")
-            return
-
-        # Identificar versión actual
-        version = self.run_cmd(["git", "describe", "--tags"]).stdout.strip()
-        if not version:
-            version = self.run_cmd(["git", "rev-parse", "HEAD"]).stdout.strip()
-
-        self.yui.log(f"Restoring to version: {version}...", "#555")
-        
-        # Reset hard y clean
-        res = self.run_cmd(["git", "reset", "--hard", version])
-        if res.returncode == 0:
-            self.run_cmd(["git", "clean", "-fd"])
+        repo_path = os.path.dirname(os.path.abspath(__file__))
+        res = repair_task.repair_panel(repo_path=repo_path, logger=getattr(self.yui, 'log', None), run_cmd=self.run_cmd)
+        code = getattr(res, 'returncode', 0) if res is not None else 0
+        if code == 0:
             self.yui.log("REPAIR COMPLETE: Integrity restored.", "#00ffcc")
         else:
             self.yui.log("REPAIR FAILED: System manual intervention required.", "#ff4444")
