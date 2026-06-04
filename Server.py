@@ -65,7 +65,7 @@ from PyQt6.QtCore import Qt, QTimer, QSize, QUrl
 from PyQt6.QtGui import QFont, QColor
 
 # Tasks refactor
-from sao_tasks import update_task, repair_task, auth_task, version_info
+from sao_tasks import update_task, repair_task, auth_task, version_info, notify_task
 
 # --- DISEÑO GLASS-SAO PREMIUM (QSS) ---
 SAO_GLASS_QSS = """
@@ -242,6 +242,7 @@ TRANSLATIONS = {
         "opt_php": "⚙️ PHP Config",
         "opt_clear": "🧹 Clear Logs",
         "opt_update_panel": "🔼 Update Panel",
+        "opt_check_releases": "🔔 Check Releases",
         "opt_save_token": "🔐 Save Git Token",
         "opt_repair_panel": "🛠️ Repair Panel",
         "opt_about": "ℹ️ About",
@@ -271,6 +272,7 @@ TRANSLATIONS = {
         "opt_php": "⚙️ Configuración PHP",
         "opt_clear": "🧹 Limpiar Logs",
         "opt_update_panel": "🔼 Actualizar Panel",
+        "opt_check_releases": "🔔 Comprobar Lanzamientos",
         "opt_save_token": "🔐 Guardar Token Git",
         "opt_repair_panel": "🛠️ Reparar Panel",
         "opt_about": "ℹ️ Acerca de",
@@ -613,6 +615,17 @@ class Kirito(QMainWindow):
         # Iniciar lógica operativa del panel (Adaptado de GTK)
         QtCore.QTimer.singleShot(100, self._iniciar_logica_panel)
 
+        # Notificaciones de releases remotos: comprobar cada 6 horas
+        try:
+            self.notify_timer = QTimer(self)
+            self.notify_timer.setInterval(1000 * 60 * 60 * 6)  # 6 horas
+            self.notify_timer.timeout.connect(self._check_notify)
+            # arrancar la primera comprobación tras 30s para no bloquear inicio
+            QtCore.QTimer.singleShot(30 * 1000, self._check_notify)
+            self.notify_timer.start()
+        except Exception:
+            self.yui.log("Init Notify Timer: failed to start.", "#ff7f00")
+
     def update_ui_texts(self):
         """Actualiza todos los textos de la interfaz según el idioma seleccionado"""
         t = TRANSLATIONS[self.idioma]
@@ -792,6 +805,30 @@ class Kirito(QMainWindow):
         except Exception as e:
             self.yui.log(f"Execution Error: {e}", "#ff4444")
             return None
+
+    def _notify_ui(self, message):
+        """Muestra la notificación en el Yui monitor y en la bandeja si es posible."""
+        try:
+            self.yui.log(message, "#00ffcc")
+            if hasattr(self, 'tray_icon'):
+                # use tray message (best-effort)
+                try:
+                    self.tray_icon.showMessage("SAO - Nuevo lanzamiento", message, QtGui.QIcon(), 5000)
+                except Exception:
+                    pass
+        except Exception:
+            print(message)
+
+    @QtCore.pyqtSlot()
+    def _check_notify(self):
+        """Llama a check_and_notify() y muestra notificaciones si procede."""
+        try:
+            # llamar al comprobador y usar UI como notificador
+            res = notify_task.check_and_notify(repo_path=os.path.dirname(os.path.abspath(__file__)), notifier=self._notify_ui, logger=lambda m: self.yui.log(m, "#555"))
+            if res.get("notified"):
+                self.yui.log(f"Update Notice: {res.get('latest')} available (local {res.get('local')})", "#00ffcc")
+        except Exception as e:
+            self.yui.log(f"Notify Error: {e}", "#ff4444")
 
     def check_system_dependencies(self):
         """Escanea pacman para verificar el entorno y despliega el diálogo si falta algo"""
@@ -1044,7 +1081,7 @@ class Kirito(QMainWindow):
     def actualizar_icono_favorito(self):
         """Cambia el icono de la estrella según si el proyecto es favorito o no"""
         proyecto = self.project_sel.currentText()
-        if proyecto in self.favoritos:
+ 2       if proyecto in self.favoritos:
             self.btn_fav.setText("★")
         else:
             self.btn_fav.setText("☆")
@@ -2165,6 +2202,7 @@ Terminal=false
         hide_act = menu.addAction(t["opt_hide"])
         sync_act = menu.addAction(t["opt_sync"])
         update_act = menu.addAction(t["opt_update_panel"])
+        check_notify_act = menu.addAction(t["opt_check_releases"])
         save_token_act = menu.addAction(t["opt_save_token"])
         repair_act = menu.addAction(t["opt_repair_panel"])
         clear_act = menu.addAction(t["opt_clear"])
@@ -2183,6 +2221,7 @@ Terminal=false
         elif action == hide_act: self.hide()
         elif action == sync_act: self.sync_web_folder_action()
         elif action == update_act: self.sync_repository()
+        elif action == check_notify_act: self._check_notify()
         elif action == save_token_act: self.save_git_token_dialog()
         elif action == repair_act: self.repair_panel()
         elif action == clear_act: self.yui.terminal.clear()

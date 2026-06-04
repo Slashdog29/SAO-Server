@@ -63,3 +63,34 @@ def get_panel_info(repo_path=None):
         info["date"] = date
 
     return info
+
+
+def pin_installed_version(repo_path=None, force=False):
+    """Escribe un archivo VERSION en el repo con la versión detectada localmente.
+    - Si ya existe `VERSION` y `force` es False, no hace nada.
+    - Devuelve la ruta del archivo y la versión escrita (o existente).
+    """
+    repo_root = repo_path or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    version_file = os.path.join(repo_root, "VERSION")
+
+    if os.path.exists(version_file) and not force:
+        try:
+            with open(version_file, "r") as vf:
+                v = vf.read().strip()
+                return version_file, v
+        except Exception:
+            pass
+
+    # Determinar versión local (prefiere tags, luego commit corto)
+    ver = _run_git(["git", "describe", "--tags", "--always"], repo_root)
+    if not ver:
+        ver = _run_git(["git", "rev-parse", "--short", "HEAD"], repo_root)
+    if not ver:
+        ver = "unknown"
+
+    try:
+        with open(version_file, "w") as vf:
+            vf.write(ver + "\n")
+        return version_file, ver
+    except Exception:
+        return None, None
