@@ -7,7 +7,7 @@
 
 **SAO-Server** es un panel de control y administrador de servicios locales diseñado para entornos **Arch Linux y distribuciones derivadas** (como CachyOS, EndeavourOS, Manjaro, etc.). Desarrollado en Python utilizando PyQt6, unifica la gestión del stack LAMP bajo una interfaz gráfica moderna e inmersiva.
 
-💡 **Inspiración y Evolución:** Este proyecto nace como una evolución conceptual y técnica de [Chimera-Panel](https://github.com/Slashdog29/Chimera-Panel), llevando la estética HUD y la lógica de gestión de servicios hacia un diseño estilizado inspirado en el universo de *Sword Art Online*.
+💡 **Inspiración y Evolución:** Este proyecto nace como una evolución conceptual y técnica de [Chimera-Panel](https://github.com/Don-Gato700/Chimera-Panel-V2), llevando la estética HUD y la lógica de gestión de servicios hacia un diseño estilizado inspirado en el universo de *Sword Art Online*.
 
 ⚠️ **Nota:** Este es un proyecto de desarrollo **no comercial**, creado con fines educativos y de mejora del flujo de trabajo personal.
 
